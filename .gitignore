@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Quartus generated files
+db/
+incremental_db/
+simulation/
+output_files/
+*.qws
+
+# Keil generated files and local UI state
+KeyBoardpro/Output/
+KeyBoardpro/Project/*.uvoptx
+KeyBoardpro/Project/*.uvguix.*
+KeyBoardpro/Project/JLinkSettings.ini
+KeyBoardpro/Project/EventRecorderStub.scvd
+KeyBoardpro/keilkill.bat
+
+# Vendored MSPM0 SDK; install/use the local TI SDK when building
+KeyBoardpro/Source/
+
+# Local captures and calibration measurements
+data/
+tmp/
+*.csv
+
+# Local archives
+*.zip
+*.rar
