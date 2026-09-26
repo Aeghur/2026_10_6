@@ -6,6 +6,7 @@ from protocol import (
     FrameDecoder,
     TYPE_ERROR,
     TYPE_PC_CAPTURE,
+    TYPE_PC_SET_PHASE,
     TYPE_PC_RESULT,
     crc16_ccitt,
     decode_error,
@@ -37,6 +38,14 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(decoder.crc_errors, 1)
         self.assertEqual([frame.sequence for frame in frames], [2])
 
+    def test_phase_configuration_layout(self) -> None:
+        encoded = encode_frame(
+            TYPE_PC_SET_PHASE, 3, (9000).to_bytes(2, "little")
+        )
+        frame = FrameDecoder().feed(encoded)[0]
+        self.assertEqual(frame.frame_type, TYPE_PC_SET_PHASE)
+        self.assertEqual(int.from_bytes(frame.payload, "little"), 9000)
+
     def test_result_layout(self) -> None:
         samples = (2000, 2048, 2100, 2048)
         spectrum = (0, 12, 4)
@@ -57,30 +66,24 @@ class ProtocolTests(unittest.TestCase):
         decoded = FrameDecoder().feed(frame)[0]
         self.assertEqual(decode_error(decoded.payload), 3)
 
-    def test_planned_three_tone_frequency_resolution(self) -> None:
-        sample_rate = 1_562_500
+    def test_single_tone_frequency_resolution(self) -> None:
+        sample_rate = 390_625
         count = 4096
         time_axis = np.arange(count) / sample_rate
-        signal = (
-            60 * np.sin(2 * np.pi * 10_500 * time_axis)
-            + 30 * np.sin(2 * np.pi * 31_500 * time_axis)
-            + 20 * np.sin(2 * np.pi * 42_000 * time_axis)
-        )
+        expected = 10_537.0
+        signal = 60 * np.sin(2 * np.pi * expected * time_axis)
         magnitude = np.abs(np.fft.rfft(signal * np.hanning(count)))
         candidates = [
             index
-            for index in range(27, 1311)
+            for index in range(10, 1050)
             if magnitude[index] >= magnitude[index - 1]
             and magnitude[index] > magnitude[index + 1]
         ]
-        bins = sorted(candidates, key=lambda index: magnitude[index], reverse=True)[:3]
-        measured = []
-        for index in bins:
-            left, center, right = magnitude[index - 1 : index + 2]
-            delta = 0.5 * (left - right) / (left - 2 * center + right)
-            measured.append((index + delta) * sample_rate / count)
-        measured.sort()
-        np.testing.assert_allclose(measured, [10_500, 31_500, 42_000], atol=100)
+        index = max(candidates, key=lambda item: magnitude[item])
+        left, center, right = magnitude[index - 1 : index + 2]
+        delta = 0.5 * (left - right) / (left - 2 * center + right)
+        measured = (index + delta) * sample_rate / count
+        self.assertAlmostEqual(measured, expected, delta=10.0)
 
 
 if __name__ == "__main__":

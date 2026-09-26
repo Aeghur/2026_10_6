@@ -3,6 +3,7 @@
 #include "msp_uart_link.h"
 
 #define FRAME_TYPE_CAPTURE (0x10U)
+#define FRAME_TYPE_SET_PHASE (0x11U)
 #define FRAME_TYPE_RESULT  (0x90U)
 #define FRAME_TYPE_ERROR   (0xE0U)
 #define RESULT_PAYLOAD_SIZE \
@@ -11,10 +12,15 @@
 
 static volatile bool gCapturePending;
 static volatile uint8_t gCaptureSequence;
+static volatile bool gPhasePending;
+static volatile uint16_t gPhaseCentiDegrees;
 static uint8_t gRxState;
+static uint8_t gRxType;
 static uint8_t gRxSequence;
 static uint8_t gRxCrcLow;
 static uint16_t gRxCrc;
+static uint8_t gRxLength;
+static uint8_t gRxPayloadLow;
 
 static uint16_t crc16Update(uint16_t crc, uint8_t value)
 {
@@ -73,9 +79,23 @@ static void endFrame(uint16_t crc)
 void PC_Link_Init(void)
 {
     gCapturePending = false;
+    gPhasePending = false;
     gRxState = 0U;
     NVIC_ClearPendingIRQ(PC_UART_INST_INT_IRQN);
     NVIC_EnableIRQ(PC_UART_INST_INT_IRQN);
+}
+
+bool PC_Link_TakePhaseRequest(uint16_t *phaseCentiDegrees)
+{
+    __disable_irq();
+    if (!gPhasePending) {
+        __enable_irq();
+        return false;
+    }
+    *phaseCentiDegrees = gPhaseCentiDegrees;
+    gPhasePending = false;
+    __enable_irq();
+    return true;
 }
 
 bool PC_Link_TakeCaptureRequest(uint8_t *sequence)
@@ -138,8 +158,11 @@ void UART1_IRQHandler(void)
                            value == 0xA5U ? 1U : 0U;
                 break;
             case 2:
-                if (value == FRAME_TYPE_CAPTURE) {
+                if (value == FRAME_TYPE_CAPTURE ||
+                    value == FRAME_TYPE_SET_PHASE) {
+                    gRxType = value;
                     gRxCrc = crc16Update(0xFFFFU, value);
+                    gRxLength = 0U;
                     gRxState = 3U;
                 } else {
                     gRxState = 0U;
@@ -152,21 +175,46 @@ void UART1_IRQHandler(void)
                 break;
             case 4:
                 gRxCrc = crc16Update(gRxCrc, value);
-                gRxState = value == 0U ? 5U : 0U;
+                gRxLength = value;
+                gRxState = 5U;
                 break;
             case 5:
                 gRxCrc = crc16Update(gRxCrc, value);
-                gRxState = value == 0U ? 6U : 0U;
+                if (value != 0U ||
+                    (gRxLength != 0U && gRxLength != 2U)) {
+                    gRxState = 0U;
+                } else if (gRxLength == 0U) {
+                    gRxState = 8U;
+                } else {
+                    gRxState = 6U;
+                }
                 break;
             case 6:
-                gRxCrcLow = value;
+                gRxPayloadLow = value;
+                gRxCrc = crc16Update(gRxCrc, value);
                 gRxState = 7U;
                 break;
             case 7:
-                if ((((uint16_t) value << 8) | gRxCrcLow) == gRxCrc &&
-                    !gCapturePending) {
-                    gCaptureSequence = gRxSequence;
-                    gCapturePending = true;
+                gPhaseCentiDegrees =
+                    (uint16_t) gRxPayloadLow | ((uint16_t) value << 8);
+                gRxCrc = crc16Update(gRxCrc, value);
+                gRxState = 8U;
+                break;
+            case 8:
+                gRxCrcLow = value;
+                gRxState = 9U;
+                break;
+            case 9:
+                if ((((uint16_t) value << 8) | gRxCrcLow) == gRxCrc) {
+                    if (gRxType == FRAME_TYPE_CAPTURE &&
+                        gRxLength == 0U && !gCapturePending) {
+                        gCaptureSequence = gRxSequence;
+                        gCapturePending = true;
+                    } else if (gRxType == FRAME_TYPE_SET_PHASE &&
+                               gRxLength == 2U &&
+                               gPhaseCentiDegrees < 36000U) {
+                        gPhasePending = true;
+                    }
                 }
                 gRxState = 0U;
                 break;

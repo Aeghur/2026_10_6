@@ -12,5 +12,6 @@ typedef enum {
 
 FPGA_CaptureStatus FPGA_Capture_Run(
     uint8_t sequence, uint16_t *samples, uint16_t *flags);
+void FPGA_Capture_SetDelay(uint8_t sequence, uint16_t delaySamples);
 
 #endif

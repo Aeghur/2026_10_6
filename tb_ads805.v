@@ -76,7 +76,7 @@ module tb_ads805;
 
     ads805 #(
         .UART_BAUD(2_000_000),
-        .DECIMATION(16),
+        .DECIMATION(64),
         .CAPTURE_SAMPLES(TEST_SAMPLES)
     ) dut (
         .clk_50m(clk), .adc_data(adc_data), .adc_otr(adc_otr),
@@ -118,7 +118,7 @@ module tb_ads805;
             $display("FAIL: payload length %0d", {frame[5],frame[4]});
             errors = errors + 1;
         end
-        if ({frame[9],frame[8],frame[7],frame[6]} !== 32'd1562500 ||
+        if ({frame[9],frame[8],frame[7],frame[6]} !== 32'd390625 ||
             {frame[11],frame[10]} !== TEST_SAMPLES) begin
             $display("FAIL: capture metadata");
             errors = errors + 1;
@@ -134,16 +134,41 @@ module tb_ads805;
             errors = errors + 1;
         end
 
-        // Each retained sample must be exactly 16 ADC conversion codes apart.
+        // Each retained sample must be exactly 64 ADC conversion codes apart.
         for (i = 1; i < TEST_SAMPLES; i = i + 1)
             if ((({frame[15+2*i][3:0],frame[14+2*i]} -
-                   {frame[13+2*i][3:0],frame[12+2*i]}) & 12'hfff) != 16) begin
+                   {frame[13+2*i][3:0],frame[12+2*i]}) & 12'hfff) != 64) begin
                 $display("FAIL: sample step at %0d", i);
                 errors = errors + 1;
             end
 
+        // MSPM0 programs a five-sample phase delay with command 0x03.
+        calculated_crc = 16'hffff;
+        calculated_crc = crc16_next(calculated_crc, 8'h03);
+        calculated_crc = crc16_next(calculated_crc, 8'h38);
+        calculated_crc = crc16_next(calculated_crc, 8'h02);
+        calculated_crc = crc16_next(calculated_crc, 8'h00);
+        calculated_crc = crc16_next(calculated_crc, 8'h05);
+        calculated_crc = crc16_next(calculated_crc, 8'h00);
+        send_uart_byte(8'ha5);
+        send_uart_byte(8'h5a);
+        send_uart_byte(8'h03);
+        send_uart_byte(8'h38);
+        send_uart_byte(8'h02);
+        send_uart_byte(8'h00);
+        send_uart_byte(8'h05);
+        send_uart_byte(8'h00);
+        send_uart_byte(calculated_crc[7:0]);
+        send_uart_byte(calculated_crc[15:8]);
+        #1000;
+        if (dut.configured_delay !== 5 ||
+            dut.phase_delay_inst.active_delay !== 5) begin
+            $display("FAIL: delay configuration was not applied");
+            errors = errors + 1;
+        end
+
         if (errors == 0)
-            $display("PASS: MSPM0 capture command, frame and CRC");
+            $display("PASS: MSPM0 capture, CRC and phase-delay command");
         else
             $display("FAIL: %0d errors", errors);
         $finish;

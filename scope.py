@@ -18,6 +18,7 @@ from protocol import (
     FrameDecoder,
     TYPE_ERROR,
     TYPE_PC_CAPTURE,
+    TYPE_PC_SET_PHASE,
     TYPE_PC_RESULT,
     decode_error,
     decode_result,
@@ -53,6 +54,13 @@ class ScopeApp:
             bar, text="单次采集", command=self.capture, state=tk.DISABLED
         )
         self.capture_btn.pack(side=tk.LEFT, padx=8)
+        ttk.Label(bar, text="目标滞后").pack(side=tk.LEFT, padx=(12, 3))
+        self.phase_var = tk.DoubleVar(value=90.0)
+        ttk.Spinbox(
+            bar, from_=0.0, to=359.99, increment=1.0,
+            textvariable=self.phase_var, width=7
+        ).pack(side=tk.LEFT)
+        ttk.Label(bar, text="°").pack(side=tk.LEFT)
         ttk.Label(bar, text="频谱单位").pack(side=tk.LEFT, padx=(18, 3))
         self.db_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
@@ -116,6 +124,19 @@ class ScopeApp:
             return
         self.sequence = (self.sequence + 1) & 0xFF
         try:
+            phase = float(self.phase_var.get())
+        except (ValueError, tk.TclError):
+            self.status.set("目标相位必须是0～359.99°的数字")
+            return
+        if not 0.0 <= phase < 360.0:
+            self.status.set("目标相位必须位于0～359.99°")
+            return
+        phase_cdeg = int(round(phase * 100.0))
+        try:
+            self.serial.write(encode_frame(
+                TYPE_PC_SET_PHASE, self.sequence,
+                phase_cdeg.to_bytes(2, "little")
+            ))
             self.serial.write(encode_frame(TYPE_PC_CAPTURE, self.sequence))
         except serial.SerialException as exc:
             self.status.set(f"发送失败：{exc}")
@@ -206,7 +227,7 @@ class ScopeApp:
             ylabel = "幅值 (FFT code)"
         self.freq_axis.plot(freq_khz, y, lw=0.9)
         self.freq_axis.set(
-            xlabel="频率 (kHz)", ylabel=ylabel, title="0～500 kHz 频谱"
+            xlabel="频率 (kHz)", ylabel=ylabel, title="0～100 kHz 单频频谱"
         )
         self.freq_axis.grid(True, alpha=0.3)
 
@@ -222,13 +243,14 @@ class ScopeApp:
                 )
 
         resolution = result.sample_rate / samples.size
-        peak_text = ", ".join(f"{p.frequency_hz/1000:.3f} kHz" for p in result.peaks)
+        peak_text = f"{result.peaks[0].frequency_hz/1000:.3f} kHz"
         otr = "触发" if result.flags & 1 else "正常"
         dac_clip = "触发" if result.flags & 2 else "正常"
+        phase_range = "超范围" if result.flags & 4 else "正常"
         self.status.set(
             f"Fs={result.sample_rate:,} S/s，N={samples.size}，"
             f"Δf={resolution:.3f} Hz，CRC=正常，OTR={otr}，"
-            f"DAC削顶={dac_clip}；峰值：{peak_text}"
+            f"DAC削顶={dac_clip}，调相={phase_range}；频率：{peak_text}"
         )
         self.figure.tight_layout(pad=2.2)
         self.canvas.draw_idle()

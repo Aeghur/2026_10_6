@@ -14,6 +14,8 @@ module uart_rx #(
     // slower parameterized simulation/debug configurations.
     localparam integer CLKS_PER_BIT = (CLK_HZ + BAUD / 2) / BAUD;
     localparam integer HALF_BIT = CLKS_PER_BIT / 2;
+    localparam [15:0] START_COUNT = HALF_BIT - 1;
+    localparam [15:0] DATA_COUNT  = CLKS_PER_BIT - 1;
 
     reg rx_meta = 1'b1;
     reg rx_sync = 1'b1;
@@ -40,7 +42,7 @@ module uart_rx #(
         end else if (!busy) begin
             if (rx_prev && !rx_sync) begin
                 busy        <= 1'b1;
-                clock_count <= HALF_BIT - 1;
+                clock_count <= START_COUNT;
                 bit_index   <= 4'd0;
             end
         end else if (clock_count != 0) begin
@@ -50,12 +52,12 @@ module uart_rx #(
                 busy <= 1'b0; // false start
             end else begin
                 bit_index   <= 4'd1;
-                clock_count <= CLKS_PER_BIT - 1;
+                clock_count <= DATA_COUNT;
             end
         end else if (bit_index <= 8) begin
             shift[bit_index - 1'b1] <= rx_sync;
             bit_index   <= bit_index + 1'b1;
-            clock_count <= CLKS_PER_BIT - 1;
+            clock_count <= DATA_COUNT;
         end else begin
             busy <= 1'b0;
             if (rx_sync) begin

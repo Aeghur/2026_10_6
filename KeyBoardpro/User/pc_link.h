@@ -8,6 +8,7 @@
 
 void PC_Link_Init(void);
 bool PC_Link_TakeCaptureRequest(uint8_t *sequence);
+bool PC_Link_TakePhaseRequest(uint16_t *phaseCentiDegrees);
 void PC_Link_SendResult(
     uint8_t sequence,
     uint16_t flags,

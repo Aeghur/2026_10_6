@@ -6,16 +6,55 @@
 #include "msp_uart_link.h"
 #include "pc_link.h"
 
+#include <stdbool.h>
 #include <stdint.h>
 
 static uint16_t gSamples[MEASUREMENT_FFT_SIZE];
+
+static bool calculateDelay(
+    uint32_t frequencyMilliHz, uint16_t phaseCentiDegrees,
+    uint16_t *delaySamples)
+{
+    uint64_t periodQ16;
+    uint64_t targetQ16;
+    uint64_t fixedQ16 =
+        (uint64_t) MEASUREMENT_FIXED_LATENCY_SAMPLES << 16;
+    uint64_t additional;
+
+    if (frequencyMilliHz < MEASUREMENT_MIN_SPECTRUM_HZ * 1000UL ||
+        frequencyMilliHz > MEASUREMENT_MAX_SPECTRUM_HZ * 1000UL)
+        return false;
+    periodQ16 =
+        (((uint64_t) MEASUREMENT_ADC_RATE_HZ * 1000ULL) << 16) /
+        frequencyMilliHz;
+    targetQ16 = periodQ16 * phaseCentiDegrees / 36000U;
+    if (targetQ16 < fixedQ16)
+        targetQ16 += periodQ16;
+    additional = targetQ16 - fixedQ16;
+    additional = (additional + 32768U) >> 16;
+    if (additional >= MEASUREMENT_DELAY_DEPTH) {
+        // Do not leave a stale, large delay active when an exact whole-cycle
+        // solution is outside RAM.  Zero additional delay is the closest
+        // safe approximation for the in-phase case at low frequency.
+        *delaySamples = 0U;
+        return false;
+    }
+    *delaySamples = (uint16_t) additional;
+    return true;
+}
 
 int main(void)
 {
     MeasurementPeak peaks[MEASUREMENT_PEAK_COUNT];
     FPGA_CaptureStatus status;
     uint16_t flags;
-    uint8_t sequence;
+    uint16_t targetPhase = MEASUREMENT_DEFAULT_PHASE_CDEG;
+    uint16_t requestedPhase;
+    uint16_t delaySamples;
+    uint16_t activeDelay = 0xFFFFU;
+    uint8_t pcSequence;
+    uint8_t fpgaSequence = 0U;
+    uint32_t trackedFrequency = 0U;
 
     SYSCFG_DL_init();
     MSP_UART_Link_Init();
@@ -23,20 +62,59 @@ int main(void)
     PC_Link_Init();
 
     while (1) {
-        if (!PC_Link_TakeCaptureRequest(&sequence)) {
-            __WFI();
-            continue;
-        }
+        if (PC_Link_TakePhaseRequest(&requestedPhase))
+            targetPhase = requestedPhase;
 
-        status = FPGA_Capture_Run(sequence, gSamples, &flags);
+        fpgaSequence++;
+        status = FPGA_Capture_Run(fpgaSequence, gSamples, &flags);
         if (status != FPGA_CAPTURE_OK) {
-            PC_Link_SendError(sequence, (uint16_t) status);
+            if (PC_Link_TakeCaptureRequest(&pcSequence))
+                PC_Link_SendError(pcSequence, (uint16_t) status);
             continue;
         }
 
         FFT_Analyzer_Process(gSamples, peaks);
-        PC_Link_SendResult(
-            sequence, flags, peaks, gSamples,
-            FFT_Analyzer_GetSpectrum());
+        if (peaks[0].frequencyMilliHz != 0U) {
+            if (trackedFrequency == 0U)
+                trackedFrequency = peaks[0].frequencyMilliHz;
+            else {
+                uint32_t frequencyDifference =
+                    trackedFrequency > peaks[0].frequencyMilliHz ?
+                    trackedFrequency - peaks[0].frequencyMilliHz :
+                    peaks[0].frequencyMilliHz - trackedFrequency;
+                uint32_t stepThreshold = trackedFrequency / 200U;
+                uint32_t twoBinsMilliHz =
+                    (2UL * MEASUREMENT_SAMPLE_RATE_HZ * 1000UL) /
+                    MEASUREMENT_FFT_SIZE;
+
+                if (stepThreshold < twoBinsMilliHz)
+                    stepThreshold = twoBinsMilliHz;
+                if (frequencyDifference > stepThreshold)
+                    trackedFrequency = peaks[0].frequencyMilliHz;
+                else
+                    trackedFrequency = (uint32_t)
+                        (((uint64_t) trackedFrequency * 7U +
+                          peaks[0].frequencyMilliHz + 4U) / 8U);
+            }
+            peaks[0].frequencyMilliHz = trackedFrequency;
+        }
+        {
+            bool phaseInRange = calculateDelay(
+                peaks[0].frequencyMilliHz, targetPhase, &delaySamples);
+
+            if (!phaseInRange)
+                flags |= MEASUREMENT_FLAG_PHASE_RANGE;
+
+            uint16_t difference = activeDelay > delaySamples ?
+                activeDelay - delaySamples : delaySamples - activeDelay;
+            if (activeDelay == 0xFFFFU || difference != 0U) {
+                FPGA_Capture_SetDelay(fpgaSequence, delaySamples);
+                activeDelay = delaySamples;
+            }
+        }
+        if (PC_Link_TakeCaptureRequest(&pcSequence))
+            PC_Link_SendResult(
+                pcSequence, flags, peaks, gSamples,
+                FFT_Analyzer_GetSpectrum());
     }
 }

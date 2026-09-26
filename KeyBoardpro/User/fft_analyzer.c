@@ -4,8 +4,6 @@
 
 #include <stdint.h>
 
-#define FFT_PEAK_GUARD_BINS (4U)
-
 static q15_t gFftInput[MEASUREMENT_FFT_SIZE];
 static q15_t gFftOutput[MEASUREMENT_FFT_SIZE * 2U];
 static uint16_t gMagnitude[MEASUREMENT_FFT_SIZE / 2U];
@@ -69,34 +67,6 @@ static uint32_t interpolatedFrequencyMilliHz(uint16_t bin)
          ((int64_t) MEASUREMENT_FFT_SIZE * 32768LL));
 }
 
-static void insertPeak(
-    MeasurementPeak peaks[MEASUREMENT_PEAK_COUNT],
-    uint16_t bin, uint16_t magnitude)
-{
-    uint32_t index;
-    uint32_t position;
-
-    for (index = 0U; index < MEASUREMENT_PEAK_COUNT; index++) {
-        int32_t distance = (int32_t) bin - (int32_t) peaks[index].bin;
-        if (peaks[index].magnitude != 0U &&
-            distance >= -(int32_t) FFT_PEAK_GUARD_BINS &&
-            distance <= (int32_t) FFT_PEAK_GUARD_BINS)
-            return;
-    }
-    if (magnitude <= peaks[MEASUREMENT_PEAK_COUNT - 1U].magnitude)
-        return;
-    position = MEASUREMENT_PEAK_COUNT - 1U;
-    while (position > 0U &&
-           magnitude > peaks[position - 1U].magnitude) {
-        peaks[position] = peaks[position - 1U];
-        position--;
-    }
-    peaks[position].bin = bin;
-    peaks[position].magnitude = magnitude;
-    peaks[position].frequencyMilliHz =
-        interpolatedFrequencyMilliHz(bin);
-}
-
 void FFT_Analyzer_Init(void)
 {
     uint32_t index;
@@ -111,6 +81,9 @@ void FFT_Analyzer_Process(
     arm_rfft_instance_q15 fft;
     uint16_t firstBin;
     uint16_t lastBin;
+    uint16_t strongestBin = 0U;
+    uint64_t bandSum = 0U;
+    uint32_t bandCount;
     uint32_t index;
 
     for (index = 0U; index < MEASUREMENT_PEAK_COUNT; index++) {
@@ -130,12 +103,24 @@ void FFT_Analyzer_Process(
         ((MEASUREMENT_MIN_SPECTRUM_HZ * MEASUREMENT_FFT_SIZE) /
          MEASUREMENT_SAMPLE_RATE_HZ);
     lastBin = (uint16_t)
-        ((MEASUREMENT_MAX_SPECTRUM_HZ * MEASUREMENT_FFT_SIZE) /
+        ((MEASUREMENT_MAX_SPECTRUM_HZ * MEASUREMENT_FFT_SIZE +
+          MEASUREMENT_SAMPLE_RATE_HZ - 1UL) /
          MEASUREMENT_SAMPLE_RATE_HZ);
     for (index = firstBin; index <= lastBin; index++) {
+        bandSum += gMagnitude[index];
         if (gMagnitude[index] >= gMagnitude[index - 1U] &&
-            gMagnitude[index] > gMagnitude[index + 1U])
-            insertPeak(peaks, (uint16_t) index, gMagnitude[index]);
+            gMagnitude[index] > gMagnitude[index + 1U] &&
+            (strongestBin == 0U ||
+             gMagnitude[index] > gMagnitude[strongestBin]))
+            strongestBin = (uint16_t) index;
+    }
+    bandCount = (uint32_t) lastBin - firstBin + 1U;
+    if (strongestBin != 0U && gMagnitude[strongestBin] >= 2U &&
+        (uint64_t) gMagnitude[strongestBin] * bandCount > bandSum * 6U) {
+        peaks[0].bin = strongestBin;
+        peaks[0].magnitude = gMagnitude[strongestBin];
+        peaks[0].frequencyMilliHz =
+            interpolatedFrequencyMilliHz(strongestBin);
     }
 }
 

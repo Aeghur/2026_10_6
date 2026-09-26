@@ -4,8 +4,9 @@ module ads805 #(
     parameter integer CLK_HZ          = 50_000_000,
     parameter integer SAMPLE_HZ       = 25_000_000,
     parameter integer UART_BAUD       = 2_000_000,
-    parameter integer DECIMATION      = 16,
+    parameter integer DECIMATION      = 64,
     parameter integer CAPTURE_SAMPLES = 4096,
+    parameter integer DELAY_DEPTH     = 8192,
     // 2026-09-25 bench calibration at 10 kHz, scope high-Z load.
     parameter integer ADC_ZERO_CODE   = 2100,
     parameter integer DAC_ZERO_CODE   = 7237,
@@ -46,7 +47,23 @@ module ads805 #(
         .sample_valid(sample_strobe)
     );
 
-    // Full-rate calibrated ADC-to-DAC path. UART still reports raw ADC codes.
+    // Full-rate phase delay and calibrated ADC-to-DAC path. UART reports the
+    // undelayed ADC samples so frequency tracking is independent of phase.
+    localparam integer DELAY_ADDR_WIDTH = $clog2(DELAY_DEPTH);
+    wire [11:0] delayed_sample_data;
+    wire delayed_sample_valid;
+    reg delay_config_valid = 1'b0;
+    reg [DELAY_ADDR_WIDTH-1:0] configured_delay =
+        {DELAY_ADDR_WIDTH{1'b0}};
+    variable_sample_delay #(.DEPTH(DELAY_DEPTH)) phase_delay_inst (
+        .clk(clk_50m), .rst(rst),
+        .sample_valid(sample_strobe), .sample_data(sample_data),
+        .config_valid(delay_config_valid),
+        .delay_samples(configured_delay),
+        .delayed_valid(delayed_sample_valid),
+        .delayed_data(delayed_sample_data)
+    );
+
     wire [13:0] mapped_dac_code;
     wire mapped_valid;
     wire mapper_clipped;
@@ -57,7 +74,7 @@ module ads805 #(
         .INVERT_OUTPUT(DAC_INVERT)
     ) voltage_mapper_inst (
         .clk(clk_50m), .rst(rst),
-        .sample_valid(sample_strobe), .sample_data(sample_data),
+        .sample_valid(delayed_sample_valid), .sample_data(delayed_sample_data),
         .mapped_valid(mapped_valid), .dac_code(mapped_dac_code),
         .clipped(mapper_clipped)
     );
@@ -84,7 +101,7 @@ module ads805 #(
         end
     endfunction
 
-    // Receive and validate the fixed, empty CAPTURE request frame.
+    // Receive CAPTURE (0x01, empty) and SET_DELAY (0x03, u16LE) frames.
     wire [7:0] rx_byte;
     wire rx_valid;
     wire rx_framing_error;
@@ -98,11 +115,13 @@ module ads805 #(
     reg [7:0] request_seq = 8'd0;
     reg [15:0] rx_crc = 16'hffff;
     reg [7:0] rx_crc_low = 8'd0;
+    reg [7:0] delay_low = 8'd0;
     reg capture_request = 1'b0;
     wire request_crc_ok = ({rx_byte, rx_crc_low} == rx_crc);
 
     always @(posedge clk_50m) begin
         capture_request <= 1'b0;
+        delay_config_valid <= 1'b0;
         if (rst || rx_framing_error) begin
             rx_state <= 4'd0;
             rx_crc   <= 16'hffff;
@@ -112,7 +131,7 @@ module ads805 #(
                 1: rx_state <= (rx_byte == 8'h5a) ? 2 :
                               (rx_byte == 8'ha5) ? 1 : 0;
                 2: begin
-                    if (rx_byte == 8'h01) begin
+                    if (rx_byte == 8'h01 || rx_byte == 8'h03) begin
                         request_type <= rx_byte;
                         rx_crc   <= crc16_next(16'hffff, rx_byte);
                         rx_state <= 3;
@@ -125,19 +144,40 @@ module ads805 #(
                 end
                 4: begin
                     rx_crc   <= crc16_next(rx_crc, rx_byte);
-                    rx_state <= (rx_byte == 0) ? 5 : 0;
+                    rx_state <= ((request_type == 8'h01 && rx_byte == 0) ||
+                                 (request_type == 8'h03 && rx_byte == 2)) ? 5 : 0;
                 end
                 5: begin
                     rx_crc   <= crc16_next(rx_crc, rx_byte);
-                    rx_state <= (rx_byte == 0) ? 6 : 0;
+                    if (rx_byte != 0)
+                        rx_state <= 0;
+                    else if (request_type == 8'h01)
+                        rx_state <= 8;
+                    else
+                        rx_state <= 6;
                 end
                 6: begin
-                    rx_crc_low <= rx_byte;
+                    delay_low <= rx_byte;
+                    rx_crc <= crc16_next(rx_crc, rx_byte);
                     rx_state   <= 7;
                 end
                 7: begin
-                    if (request_crc_ok)
-                        capture_request <= 1'b1;
+                    configured_delay <=
+                        {rx_byte[DELAY_ADDR_WIDTH-9:0], delay_low};
+                    rx_crc <= crc16_next(rx_crc, rx_byte);
+                    rx_state <= 8;
+                end
+                8: begin
+                    rx_crc_low <= rx_byte;
+                    rx_state <= 9;
+                end
+                9: begin
+                    if (request_crc_ok) begin
+                        if (request_type == 8'h01)
+                            capture_request <= 1'b1;
+                        else
+                            delay_config_valid <= 1'b1;
+                    end
                     rx_state <= 0;
                 end
                 default: rx_state <= 0;
@@ -212,12 +252,14 @@ module ads805 #(
 
     function [7:0] frame_byte;
         input [15:0] index;
+        input [7:0] sequence_value;
+        input [11:0] sample_value;
         begin
             case (index)
                 0: frame_byte = 8'ha5;
                 1: frame_byte = 8'h5a;
                 2: frame_byte = 8'h81;
-                3: frame_byte = capture_seq;
+                3: frame_byte = sequence_value;
                 4: frame_byte = PAYLOAD_LENGTH[7:0];
                 5: frame_byte = PAYLOAD_LENGTH[15:8];
                 6: frame_byte = EFFECTIVE_RATE[7:0];
@@ -230,8 +272,8 @@ module ads805 #(
                 13: frame_byte = 8'd0;
                 default:
                     if (index < FRAME_LENGTH - 2)
-                        frame_byte = index[0] ? {4'd0, read_data[11:8]} :
-                                               read_data[7:0];
+                        frame_byte = index[0] ? {4'd0, sample_value[11:8]} :
+                                               sample_value[7:0];
                     else if (index == FRAME_LENGTH - 2)
                         frame_byte = tx_crc[7:0];
                     else
@@ -258,10 +300,11 @@ module ads805 #(
             else
                 tx_index <= tx_index + 1'b1;
         end else if (tx_active && !tx_busy && !tx_start) begin
-            tx_data  <= frame_byte(tx_index);
+            tx_data  <= frame_byte(tx_index, capture_seq, read_data);
             tx_start <= 1'b1;
             if (tx_index >= 2 && tx_index < FRAME_LENGTH - 2)
-                tx_crc <= crc16_next(tx_crc, frame_byte(tx_index));
+                tx_crc <= crc16_next(
+                    tx_crc, frame_byte(tx_index, capture_seq, read_data));
             // Sample bytes begin at index 14. Advance after each high byte.
             if (tx_index >= 15 && tx_index < FRAME_LENGTH - 2 &&
                 tx_index[0] && read_addr != CAPTURE_SAMPLES - 1)
@@ -280,5 +323,7 @@ module ads805 #(
             $display("ERROR: SAMPLE_HZ must divide by DECIMATION");
         if (CAPTURE_SAMPLES > 4096)
             $display("ERROR: protocol frame index width supports at most 4096 samples");
+        if ((1 << DELAY_ADDR_WIDTH) != DELAY_DEPTH)
+            $display("ERROR: DELAY_DEPTH must be a power of two");
     end
 endmodule

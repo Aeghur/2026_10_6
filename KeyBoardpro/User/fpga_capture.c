@@ -6,6 +6,7 @@
 #include <stdbool.h>
 
 #define FPGA_TYPE_CAPTURE       (0x01U)
+#define FPGA_TYPE_SET_DELAY     (0x03U)
 #define FPGA_TYPE_SAMPLES       (0x81U)
 #define FPGA_PAYLOAD_SIZE       (8U + MEASUREMENT_FFT_SIZE * 2U)
 #define FPGA_BYTE_TIMEOUT_LOOPS (4000000UL)
@@ -48,6 +49,28 @@ static void sendCaptureCommand(uint8_t sequence)
         crc = crc16Update(crc, frame[index]);
     frame[6] = (uint8_t) crc;
     frame[7] = (uint8_t) (crc >> 8);
+    for (index = 0U; index < sizeof(frame); index++)
+        DL_UART_Main_transmitDataBlocking(FPGA_UART_INST, frame[index]);
+}
+
+void FPGA_Capture_SetDelay(uint8_t sequence, uint16_t delaySamples)
+{
+    uint8_t frame[10];
+    uint16_t crc = 0xFFFFU;
+    uint8_t index;
+
+    frame[0] = 0xA5U;
+    frame[1] = 0x5AU;
+    frame[2] = FPGA_TYPE_SET_DELAY;
+    frame[3] = sequence;
+    frame[4] = 2U;
+    frame[5] = 0U;
+    frame[6] = (uint8_t) delaySamples;
+    frame[7] = (uint8_t) (delaySamples >> 8);
+    for (index = 2U; index < 8U; index++)
+        crc = crc16Update(crc, frame[index]);
+    frame[8] = (uint8_t) crc;
+    frame[9] = (uint8_t) (crc >> 8);
     for (index = 0U; index < sizeof(frame); index++)
         DL_UART_Main_transmitDataBlocking(FPGA_UART_INST, frame[index]);
 }
