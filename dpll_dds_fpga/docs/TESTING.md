@@ -35,6 +35,29 @@ quartus/dpll_dds.qpf
 - 正弦ROM已由`sine_1024x16.hex`初始化；
 - ADC和DAC引脚与旧板卡一致。
 
+Quartus Prime 18.1实测完整编译已通过，生成文件为
+`quartus/output_files/dpll_dds.sof`。当前EP4CE6F17C8资源占用较高：逻辑单元
+6078/6272（97%），但50 MHz慢速85 °C模型建立时间余量仍为+0.490 ns。
+
+## MSPM0 Keil工程
+
+打开：
+
+```text
+mspm0/Keil_DPLL/Project/dpll_dds.uvprojx
+```
+
+选择`DPLL_DDS_MSPM0G3519`目标并执行Build。工程使用ARM Compiler 6，
+复用仓库`KeyBoardpro/Source`内的TI DriverLib，并在编译前调用MSPM0 SDK的
+SysConfig脚本。Keil µVision 5实测编译结果为0 error、0 warning，生成HEX：
+
+```text
+mspm0/Keil_DPLL/Output/dpll_dds_mspm0.hex
+```
+
+烧录后先只连接PC串口，确认相位设置命令有回应；再连接FPGA串口并检查PC界面
+可读取频率和锁定状态。详细引脚定义见`mspm0/Keil_DPLL/README.md`。
+
 ## 上板顺序
 
 1. 暂不连接模拟输入，确认DAC静态中心接近0 V。

@@ -33,7 +33,7 @@ MSPM0只承担PC通信、参数设置和状态读取，不参与实时锁相。�
 | `quartus/` | 独立Quartus工程文件 |
 | `docs/` | 架构、定点格式、环路设计和标定记录 |
 | `references/` | 外部参考模块的来源及适配说明 |
-| `mspm0/` | 独立方案的MSPM0配置与状态驱动 |
+| `mspm0/` | FPGA协议驱动及完整MSPM0G3519 Keil工程 |
 
 ## 固定硬件条件
 
@@ -67,7 +67,10 @@ cd E:\eishero2q\ad9226\dpll_dds_fpga
 .\scripts\run_tests.ps1
 ```
 
-Quartus入口为`quartus/dpll_dds.qpf`。详细设计和上板步骤见`docs/`。
+Quartus入口为`quartus/dpll_dds.qpf`。MSPM0 Keil入口为
+`mspm0/Keil_DPLL/Project/dpll_dds.uvprojx`。完整工程保留PC经MSPM0设置相位、
+读取频率/锁定/故障状态的兼容功能；接线和烧录说明见
+`mspm0/Keil_DPLL/README.md`，详细设计和上板步骤见`docs/`。
 
 ## 可参考资源
 

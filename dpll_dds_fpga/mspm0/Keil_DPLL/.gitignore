@@ -1,0 +1,6 @@
+Output/
+Project/*.uvoptx
+Project/*.uvguix.*
+Project/JLinkSettings.ini
+Project/EventRecorderStub.scvd
+User/Event.dot
