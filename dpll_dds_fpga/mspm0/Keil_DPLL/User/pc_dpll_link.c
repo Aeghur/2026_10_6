@@ -4,7 +4,9 @@
 
 #define PC_TYPE_CAPTURE       (0x10U)
 #define PC_TYPE_SET_PHASE     (0x11U)
+#define PC_TYPE_DPLL_STATUS   (0x12U)
 #define PC_TYPE_RESULT        (0x90U)
+#define PC_TYPE_DPLL_RESULT   (0x91U)
 #define PC_TYPE_ERROR         (0xE0U)
 
 // Keep the existing PC result decoder compatible. The DPLL generates a new
@@ -16,6 +18,8 @@
 
 static volatile bool gStatusPending;
 static volatile uint8_t gStatusSequence;
+static volatile bool gRawStatusPending;
+static volatile uint8_t gRawStatusSequence;
 static volatile bool gPhasePending;
 static volatile uint16_t gPhaseCentiDegrees;
 static uint8_t gRxState;
@@ -80,6 +84,7 @@ static void endFrame(uint16_t crc)
 void PC_DPLL_Link_Init(void)
 {
     gStatusPending = false;
+    gRawStatusPending = false;
     gPhasePending = false;
     gRxState = 0U;
     NVIC_ClearPendingIRQ(PC_UART_INST_INT_IRQN);
@@ -108,6 +113,19 @@ bool PC_DPLL_Link_TakeStatusRequest(uint8_t *sequence)
     }
     *sequence = gStatusSequence;
     gStatusPending = false;
+    __enable_irq();
+    return true;
+}
+
+bool PC_DPLL_Link_TakeRawStatusRequest(uint8_t *sequence)
+{
+    __disable_irq();
+    if (!gRawStatusPending) {
+        __enable_irq();
+        return false;
+    }
+    *sequence = gRawStatusSequence;
+    gRawStatusPending = false;
     __enable_irq();
     return true;
 }
@@ -152,6 +170,19 @@ void PC_DPLL_Link_SendError(uint8_t sequence, uint16_t errorCode)
     endFrame(crc);
 }
 
+void PC_DPLL_Link_SendRawStatus(
+    uint8_t sequence, const DPLL_FPGA_Status *status)
+{
+    uint16_t crc;
+    beginFrame(PC_TYPE_DPLL_RESULT, sequence, 16U, &crc);
+    sendU32(status->phaseIncrement, &crc);
+    sendU32((uint32_t) status->phaseErrorQ23, &crc);
+    sendU16(status->flags, &crc);
+    sendU16(status->dacCode, &crc);
+    sendU32(status->sampleRateHz, &crc);
+    endFrame(crc);
+}
+
 void UART1_IRQHandler(void)
 {
     while (!DL_UART_Main_isRXFIFOEmpty(PC_UART_INST)) {
@@ -165,7 +196,8 @@ void UART1_IRQHandler(void)
                            value == 0xA5U ? 1U : 0U;
                 break;
             case 2:
-                if (value == PC_TYPE_CAPTURE || value == PC_TYPE_SET_PHASE) {
+                if (value == PC_TYPE_CAPTURE || value == PC_TYPE_SET_PHASE ||
+                    value == PC_TYPE_DPLL_STATUS) {
                     gRxType = value;
                     gRxCrc = crc16Update(0xFFFFU, value);
                     gRxState = 3U;
@@ -215,6 +247,10 @@ void UART1_IRQHandler(void)
                         !gStatusPending) {
                         gStatusSequence = gRxSequence;
                         gStatusPending = true;
+                    } else if (gRxType == PC_TYPE_DPLL_STATUS &&
+                               gRxLength == 0U && !gRawStatusPending) {
+                        gRawStatusSequence = gRxSequence;
+                        gRawStatusPending = true;
                     } else if (gRxType == PC_TYPE_SET_PHASE &&
                                gRxLength == 2U &&
                                gPhaseCentiDegrees < 36000U) {

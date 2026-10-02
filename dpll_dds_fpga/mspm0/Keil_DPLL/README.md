@@ -13,6 +13,7 @@ Keil入口：`Project/dpll_dds.uvprojx`。
 - 将PC的0～359.99°目标相位转换为32 bit FPGA相位字；
 - 查询FPGA频率、锁定、OTR和DAC削顶状态；
 - 保持现有`scope.py`的设置相位、单次采集和结果帧兼容。
+- 支持`dpll_control.py`实时读取频率、锁定、相位误差和DAC码。
 
 新FPGA不再上传4096点ADC/FFT数据，因此兼容结果中仅返回一个中心采样点和
 一个状态幅值点。PC界面仍可显示频率、CRC、OTR、DAC削顶和调相状态，时域及
@@ -39,6 +40,18 @@ Keil入口：`Project/dpll_dds.uvprojx`。
 3. 用UniFlash烧录该HEX；如果已经在Keil目标选项中配置好板载调试器，也可直接Download。
 4. FPGA先烧录`quartus/output_files/dpll_dds.sof`，再给MSPM0复位。
 5. PC运行仓库原界面，选择MSPM0对应串口和1,000,000 baud。
+
+推荐使用根目录的DPLL专用诊断脚本进行首次调试：
+
+```powershell
+cd E:\eishero2q\ad9226
+python -m pip install -r requirements.txt
+python dpll_control.py --port COM6 --phase 0
+```
+
+将`COM6`换成设备管理器中USB-TTL对应端口。按`Ctrl+C`停止；测试90°时重新运行
+并改为`--phase 90`。脚本每250 ms显示频率、锁定、输入有效、环路相位误差、
+当前DAC码、削顶和ADC OTR。
 
 上电后MSPM0会自动向FPGA发送0°、幅度2143、相位校准0、输出使能的默认配置。
 如果暂时不接MSPM0，FPGA的UART RX必须上拉到3.3 V；DPLL实时锁相本身仍在FPGA

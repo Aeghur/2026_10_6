@@ -46,5 +46,15 @@ int main(void)
             else
                 PC_DPLL_Link_SendError(pcSequence, (uint16_t) result);
         }
+
+        if (PC_DPLL_Link_TakeRawStatusRequest(&pcSequence)) {
+            DPLL_FPGA_Result result;
+            fpgaSequence++;
+            result = DPLL_FPGA_ReadStatus(fpgaSequence, &status);
+            if (result == DPLL_FPGA_OK)
+                PC_DPLL_Link_SendRawStatus(pcSequence, &status);
+            else
+                PC_DPLL_Link_SendError(pcSequence, (uint16_t) result);
+        }
     }
 }

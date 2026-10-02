@@ -106,6 +106,17 @@ python scope.py
 - 自动测得的单频频率；
 - OTR、DAC削顶、CRC和调相范围状态。
 
+独立DPLL/DDS工程建议改用实时诊断脚本，它不会显示占位波形，而是直接读取
+FPGA的锁定状态和环路相位误差：
+
+```powershell
+python dpll_control.py --port COM6 --phase 0
+```
+
+将`COM6`替换为实际USB-TTL串口；用`--phase 90`、`180`、`270`分别测试
+相位控制，按`Ctrl+C`退出。该诊断命令要求烧录
+`dpll_dds_fpga/mspm0/Keil_DPLL/Output/dpll_dds_mspm0.hex`。
+
 ## 接线
 
 所有数字设备使用3.3 V并共地。

@@ -20,6 +20,16 @@ cd E:\eishero2q\ad9226\dpll_dds_fpga
 闭环Testbench使用缩短的IIR时间常数加速RTL仿真；综合顶层仍使用
 `LPF_SHIFT=16`和`LOOP_DECIMATION_LOG2=10`。
 
+40～100 kHz真实综合参数专项回归耗时较长，单独执行：
+
+```powershell
+.\scripts\run_high_band_test.ps1
+```
+
+该测试覆盖40、50、约60、约80和100 kHz，检查锁定、频率误差以及0°输出
+是否保持同极性。当前五个频点全部通过；100 kHz仿真的稳态环路相位误差约
++2.63°，没有出现40 kHz反相。
+
 ## Quartus
 
 打开：
@@ -66,4 +76,15 @@ mspm0/Keil_DPLL/Output/dpll_dds_mspm0.hex
 4. 依次设置0、45、90、180、270°，测量相位和频率。
 5. 再测试1、3、10、20、40、60、80、100 kHz。
 6. 记录每点残差，计算`phase_calibration(f)`表后再固化补偿。
+
+高频异常时，应先运行根目录的实时诊断脚本：
+
+```powershell
+python dpll_control.py --port COM6 --phase 0
+```
+
+重点记录40、50、60、80和100 kHz的`lock`、`signal`、`phase_error`、`clip`
+和`OTR`。若`lock=否`或`signal=无`，先排查输入幅度、ADC零点和采样质量；若
+`lock=是`且`phase_error`接近0°，但示波器仍显示反相，则应检查DAC模拟链路、
+示波器通道反相选项及探头参考地，而不是继续调整DPLL增益。
 
