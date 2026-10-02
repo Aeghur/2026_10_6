@@ -7,11 +7,11 @@ module ads805 #(
     parameter integer DECIMATION      = 64,
     parameter integer CAPTURE_SAMPLES = 4096,
     parameter integer DELAY_DEPTH     = 8192,
-    // 2026-09-25 bench calibration at 10 kHz, scope high-Z load.
-    parameter integer ADC_ZERO_CODE   = 2100,
-    parameter integer DAC_ZERO_CODE   = 7237,
-    parameter integer DAC_GAIN_Q16    = 495241,
-    parameter integer DAC_INVERT      = 1
+    // 2026-10-02 bench calibration at 10 kHz, scope high-Z load.
+    parameter integer ADC_ZERO_CODE   = 2104,
+    parameter integer DAC_ZERO_CODE   = 8279,
+    parameter integer DAC_GAIN_Q16    = 318171,
+    parameter integer DAC_INVERT      = 0
 ) (
     input  wire        clk_50m,
     input  wire [11:0] adc_data,
