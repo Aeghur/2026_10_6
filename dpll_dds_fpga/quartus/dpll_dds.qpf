@@ -1,0 +1,4 @@
+QUARTUS_VERSION = "18.1"
+DATE = "17:00:00  October 02, 2026"
+PROJECT_REVISION = "dpll_dds"
+

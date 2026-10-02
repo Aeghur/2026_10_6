@@ -1,0 +1,73 @@
+set_global_assignment -name FAMILY "Cyclone IV E"
+set_global_assignment -name DEVICE EP4CE6F17C8
+set_global_assignment -name TOP_LEVEL_ENTITY dpll_dds_top
+set_global_assignment -name ORIGINAL_QUARTUS_VERSION 18.1.0
+set_global_assignment -name PROJECT_OUTPUT_DIRECTORY output_files
+set_global_assignment -name NUM_PARALLEL_PROCESSORS 4
+set_global_assignment -name MIN_CORE_JUNCTION_TEMP 0
+set_global_assignment -name MAX_CORE_JUNCTION_TEMP 85
+set_global_assignment -name NOMINAL_CORE_SUPPLY_VOLTAGE 1.2V
+set_global_assignment -name RESERVE_ALL_UNUSED_PINS "AS INPUT TRI-STATED"
+
+set_global_assignment -name VERILOG_FILE ../rtl/unsigned_serial_divider.v
+set_global_assignment -name VERILOG_FILE ../rtl/coarse_frequency_estimator.v
+set_global_assignment -name VERILOG_FILE ../rtl/sine_rom_dp.v
+set_global_assignment -name VERILOG_FILE ../rtl/cordic_atan2.v
+set_global_assignment -name VERILOG_FILE ../rtl/iq_phase_detector.v
+set_global_assignment -name VERILOG_FILE ../rtl/dpll_controller.v
+set_global_assignment -name VERILOG_FILE ../rtl/dds_output.v
+set_global_assignment -name VERILOG_FILE ../rtl/dpll_dds_core.v
+set_global_assignment -name VERILOG_FILE ../rtl/dpll_adc_capture.v
+set_global_assignment -name VERILOG_FILE ../rtl/dpll_dac_output.v
+set_global_assignment -name VERILOG_FILE ../rtl/dpll_uart_rx.v
+set_global_assignment -name VERILOG_FILE ../rtl/dpll_uart_tx.v
+set_global_assignment -name VERILOG_FILE ../rtl/dpll_uart_bridge.v
+set_global_assignment -name VERILOG_FILE ../rtl/dpll_dds_top.v
+set_global_assignment -name HEX_FILE ../rtl/sine_1024x16.hex
+set_global_assignment -name SDC_FILE ../constraints/dpll_dds.sdc
+
+set_location_assignment PIN_E1 -to clk_50m
+
+set_location_assignment PIN_M8 -to adc_data[0]
+set_location_assignment PIN_N8 -to adc_data[1]
+set_location_assignment PIN_P8 -to adc_data[2]
+set_location_assignment PIN_N12 -to adc_data[3]
+set_location_assignment PIN_M11 -to adc_data[4]
+set_location_assignment PIN_T11 -to adc_data[5]
+set_location_assignment PIN_R10 -to adc_data[6]
+set_location_assignment PIN_T10 -to adc_data[7]
+set_location_assignment PIN_R9 -to adc_data[8]
+set_location_assignment PIN_T9 -to adc_data[9]
+set_location_assignment PIN_T8 -to adc_data[10]
+set_location_assignment PIN_R8 -to adc_data[11]
+set_location_assignment PIN_M9 -to adc_clk
+set_location_assignment PIN_N6 -to adc_otr
+
+set_location_assignment PIN_A8 -to dac_clk
+set_location_assignment PIN_A9 -to dac_data[13]
+set_location_assignment PIN_B9 -to dac_data[12]
+set_location_assignment PIN_A11 -to dac_data[11]
+set_location_assignment PIN_B11 -to dac_data[10]
+set_location_assignment PIN_A12 -to dac_data[9]
+set_location_assignment PIN_B12 -to dac_data[8]
+set_location_assignment PIN_A13 -to dac_data[7]
+set_location_assignment PIN_B13 -to dac_data[6]
+set_location_assignment PIN_A14 -to dac_data[5]
+set_location_assignment PIN_B14 -to dac_data[4]
+set_location_assignment PIN_A15 -to dac_data[3]
+set_location_assignment PIN_B8 -to dac_data[2]
+set_location_assignment PIN_C15 -to dac_data[1]
+set_location_assignment PIN_C16 -to dac_data[0]
+
+set_location_assignment PIN_R13 -to uart_tx
+set_location_assignment PIN_T13 -to uart_rx
+
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to clk_50m
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to adc_data[*]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to adc_clk
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to adc_otr
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to dac_clk
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to dac_data[*]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to uart_tx
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to uart_rx
+
