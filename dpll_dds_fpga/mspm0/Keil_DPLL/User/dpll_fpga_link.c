@@ -7,7 +7,7 @@
 #define DPLL_TYPE_STATUS         (0x90U)
 #define DPLL_CONFIG_LENGTH       (11U)
 #define DPLL_STATUS_LENGTH       (16U)
-#define DPLL_RX_TIMEOUT_LOOPS    (4000000UL)
+#define DPLL_RX_TIMEOUT_LOOPS    (800000UL)
 
 static uint16_t crc16Update(uint16_t crc, uint8_t value)
 {

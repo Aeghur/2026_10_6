@@ -56,7 +56,9 @@ void MSP_UART_Link_Init(void)
         PC_UART_INST, DL_UART_RX_FIFO_LEVEL_ONE_ENTRY);
     DL_UART_Main_setTXFIFOThreshold(
         PC_UART_INST, DL_UART_TX_FIFO_LEVEL_ONE_ENTRY);
-    DL_UART_Main_enableInterrupt(
+    // PC RX is drained by the main loop. Polling avoids depending on the
+    // UART1 interrupt routing and is fast enough for the short command frames.
+    DL_UART_Main_disableInterrupt(
         PC_UART_INST, DL_UART_MAIN_INTERRUPT_RX);
     DL_UART_Main_enable(PC_UART_INST);
 

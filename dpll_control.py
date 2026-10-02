@@ -33,7 +33,7 @@ def choose_port(requested: str | None) -> str:
     raise RuntimeError(f"检测到多个串口（{names}），请用 --port COMx 指定")
 
 
-def receive_frame(link: serial.Serial, sequence: int, timeout: float = 1.0):
+def receive_frame(link: serial.Serial, sequence: int, timeout: float = 3.0):
     decoder = FrameDecoder(max_payload=64)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:

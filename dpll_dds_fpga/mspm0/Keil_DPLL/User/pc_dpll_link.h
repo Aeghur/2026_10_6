@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 void PC_DPLL_Link_Init(void);
+void PC_DPLL_Link_Poll(void);
 bool PC_DPLL_Link_TakePhaseRequest(uint16_t *phaseCentiDegrees);
 bool PC_DPLL_Link_TakeStatusRequest(uint8_t *sequence);
 bool PC_DPLL_Link_TakeRawStatusRequest(uint8_t *sequence);

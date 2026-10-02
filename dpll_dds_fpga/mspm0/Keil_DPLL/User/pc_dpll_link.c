@@ -87,8 +87,8 @@ void PC_DPLL_Link_Init(void)
     gRawStatusPending = false;
     gPhasePending = false;
     gRxState = 0U;
+    NVIC_DisableIRQ(PC_UART_INST_INT_IRQN);
     NVIC_ClearPendingIRQ(PC_UART_INST_INT_IRQN);
-    NVIC_EnableIRQ(PC_UART_INST_INT_IRQN);
 }
 
 bool PC_DPLL_Link_TakePhaseRequest(uint16_t *phaseCentiDegrees)
@@ -183,7 +183,7 @@ void PC_DPLL_Link_SendRawStatus(
     endFrame(crc);
 }
 
-void UART1_IRQHandler(void)
+void PC_DPLL_Link_Poll(void)
 {
     while (!DL_UART_Main_isRXFIFOEmpty(PC_UART_INST)) {
         uint8_t value = DL_UART_Main_receiveData(PC_UART_INST);
@@ -264,5 +264,10 @@ void UART1_IRQHandler(void)
                 break;
         }
     }
+}
+
+void UART1_IRQHandler(void)
+{
+    PC_DPLL_Link_Poll();
 }
 

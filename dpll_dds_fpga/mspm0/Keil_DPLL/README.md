@@ -15,6 +15,9 @@ Keil入口：`Project/dpll_dds.uvprojx`。
 - 保持现有`scope.py`的设置相位、单次采集和结果帧兼容。
 - 支持`dpll_control.py`实时读取频率、锁定、相位误差和DAC码。
 
+PC UART1采用主循环轮询接收短命令帧，不依赖UART中断；FPGA UART4状态查询
+带有限超时，FPGA未连接时MSPM0仍会及时向PC返回错误帧。
+
 新FPGA不再上传4096点ADC/FFT数据，因此兼容结果中仅返回一个中心采样点和
 一个状态幅值点。PC界面仍可显示频率、CRC、OTR、DAC削顶和调相状态，时域及
 频谱图不再代表实际采集波形。
