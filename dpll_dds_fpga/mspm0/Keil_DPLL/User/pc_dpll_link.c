@@ -87,8 +87,8 @@ void PC_DPLL_Link_Init(void)
     gRawStatusPending = false;
     gPhasePending = false;
     gRxState = 0U;
-    NVIC_DisableIRQ(PC_UART_INST_INT_IRQN);
     NVIC_ClearPendingIRQ(PC_UART_INST_INT_IRQN);
+    NVIC_EnableIRQ(PC_UART_INST_INT_IRQN);
 }
 
 bool PC_DPLL_Link_TakePhaseRequest(uint16_t *phaseCentiDegrees)

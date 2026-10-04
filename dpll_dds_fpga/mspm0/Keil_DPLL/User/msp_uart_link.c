@@ -49,16 +49,15 @@ void MSP_UART_Link_Init(void)
     DL_UART_Main_init(PC_UART_INST, &gPcConfig);
     DL_UART_Main_setOversampling(
         PC_UART_INST, DL_UART_OVERSAMPLING_RATE_16X);
-    // BUSCLK is 80 MHz: 80 MHz / (16 * 5.0) = 1 Mbaud.
-    DL_UART_Main_setBaudRateDivisor(PC_UART_INST, 5U, 0U);
+    // Keep the divisor proven by the working legacy firmware. The UART
+    // peripheral BUSCLK on this board is not the 80 MHz CPU clock.
+    DL_UART_Main_setBaudRateDivisor(PC_UART_INST, 2U, 32U);
     DL_UART_Main_enableFIFOs(PC_UART_INST);
     DL_UART_Main_setRXFIFOThreshold(
         PC_UART_INST, DL_UART_RX_FIFO_LEVEL_ONE_ENTRY);
     DL_UART_Main_setTXFIFOThreshold(
         PC_UART_INST, DL_UART_TX_FIFO_LEVEL_ONE_ENTRY);
-    // PC RX is drained by the main loop. Polling avoids depending on the
-    // UART1 interrupt routing and is fast enough for the short command frames.
-    DL_UART_Main_disableInterrupt(
+    DL_UART_Main_enableInterrupt(
         PC_UART_INST, DL_UART_MAIN_INTERRUPT_RX);
     DL_UART_Main_enable(PC_UART_INST);
 
@@ -66,7 +65,7 @@ void MSP_UART_Link_Init(void)
     DL_UART_Main_init(FPGA_UART_INST, &gFpgaConfig);
     DL_UART_Main_setOversampling(
         FPGA_UART_INST, DL_UART_OVERSAMPLING_RATE_16X);
-    // BUSCLK is 80 MHz: 80 MHz / (16 * 2.5) = 2 Mbaud.
+    // Keep the same UART4 divisor used by the working legacy link.
     DL_UART_Main_setBaudRateDivisor(FPGA_UART_INST, 2U, 32U);
     DL_UART_Main_enableFIFOs(FPGA_UART_INST);
     DL_UART_Main_setRXFIFOThreshold(

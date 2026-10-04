@@ -29,8 +29,6 @@ int main(void)
         DEFAULT_AMPLITUDE_CODE, true);
 
     while (1) {
-        PC_DPLL_Link_Poll();
-
         if (PC_DPLL_Link_TakePhaseRequest(&requestedPhase)) {
             targetPhase = requestedPhase;
             fpgaSequence++;
