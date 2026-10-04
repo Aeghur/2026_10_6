@@ -8,7 +8,9 @@
 #include <stdint.h>
 
 #define DEFAULT_PHASE_CDEG       (0U)
-#define DEFAULT_CALIBRATION_WORD (0U)
+// Board-level ADC/DAC analog path has one polarity inversion. Add pi to the
+// synthesized output so a PC command of 0 degrees is physically in phase.
+#define DEFAULT_CALIBRATION_WORD (0x80000000UL)
 #define DEFAULT_AMPLITUDE_CODE   (2143U)
 
 int main(void)
