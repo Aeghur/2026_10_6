@@ -15,6 +15,8 @@ module zero_crossing_dds #(
     parameter integer FREQUENCY_TRIM_LIMIT_SHIFT = 2,
     parameter integer RAMP_INCREMENT = 4,
     parameter integer PIPELINE_ADVANCE_SAMPLES = 10,
+    parameter integer PHASE_CALIBRATION_LAG_CDEG = 0,
+    parameter integer PHASE_CALIBRATION_DELAY_SAMPLES = 0,
     parameter ROM_FILE = "dpll_dds_fpga/rtl/sine_1024x16.hex"
 ) (
     input  wire        clk,
@@ -109,13 +111,20 @@ module zero_crossing_dds #(
     wire signed [31:0] phase_lag_slew =
         $signed(phase_step >> 5);
 
-    // Account for the measured ADC-to-DAC pipeline while evaluating the ROM
-    // phase.  PIPELINE_ADVANCE_SAMPLES is a synthesis-time constant.
+    // Keep the physical pipeline advance separate from the board calibration.
+    // The latter removes the measured analog/comparator lead without changing
+    // the phase lag requested by the MSPM0.
     wire [63:0] phase_advance_product =
         phase_step * PIPELINE_ADVANCE_SAMPLES;
     wire [31:0] phase_advance = phase_advance_product[31:0];
+    wire [63:0] calibration_delay_product =
+        phase_step * PHASE_CALIBRATION_DELAY_SAMPLES;
+    localparam [31:0] CALIBRATION_LAG_WORD =
+        (64'd4294967296 * PHASE_CALIBRATION_LAG_CDEG + 64'd18000) /
+        64'd36000;
     wire [31:0] output_phase =
-        carrier_phase + phase_advance - applied_phase_lag;
+        carrier_phase + phase_advance - applied_phase_lag -
+        calibration_delay_product[31:0] - CALIBRATION_LAG_WORD;
 
     wire signed [15:0] sine_sample;
     reg [11:0] envelope_pipe = 12'd0;

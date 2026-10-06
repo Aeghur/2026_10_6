@@ -12,7 +12,10 @@ module ads805 #(
     parameter integer DAC_ZERO_CODE   = 8279,
     parameter integer DAC_GAIN_Q16    = 318171,
     parameter integer DAC_INVERT      = 0,
-    parameter integer DDS_PIPELINE_ADVANCE_SAMPLES = 10
+    parameter integer DDS_PIPELINE_ADVANCE_SAMPLES = 10,
+    // DDS 0-degree sweep, 1...100 kHz, 2026-10-06.
+    parameter integer DDS_PHASE_CALIBRATION_LAG_CDEG = 196,
+    parameter integer DDS_PHASE_CALIBRATION_DELAY_SAMPLES = 2
 ) (
     input  wire        clk_50m,
     input  wire [11:0] adc_data,
@@ -106,7 +109,10 @@ module ads805 #(
     zero_crossing_dds #(
         .ADC_ZERO_CODE(ADC_ZERO_CODE),
         .SAMPLE_HZ(SAMPLE_HZ),
-        .PIPELINE_ADVANCE_SAMPLES(DDS_PIPELINE_ADVANCE_SAMPLES)
+        .PIPELINE_ADVANCE_SAMPLES(DDS_PIPELINE_ADVANCE_SAMPLES),
+        .PHASE_CALIBRATION_LAG_CDEG(DDS_PHASE_CALIBRATION_LAG_CDEG),
+        .PHASE_CALIBRATION_DELAY_SAMPLES(
+            DDS_PHASE_CALIBRATION_DELAY_SAMPLES)
     ) zero_crossing_dds_inst (
         .clk(clk_50m), .rst(rst), .enable(output_mode_dds),
         .config_valid(dds_config_valid || measured_frequency_valid),

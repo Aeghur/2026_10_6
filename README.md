@@ -111,8 +111,13 @@ Keil工程：`KeyBoardpro/Project/empty.uvprojx`。
 
 `MEASUREMENT_FIXED_LATENCY_SAMPLES` 当前初值为10。它代表流水线路径从ADC
 模拟输入到DAC模拟输出的等效25 MSPS采样点数。DDS路径对应顶层参数
-`DDS_PIPELINE_ADVANCE_SAMPLES`，当前同样为10。两种模式应分别用示波器校准，
-否则目标相位会存在随频率线性增加的固定延迟误差。
+`DDS_PIPELINE_ADVANCE_SAMPLES`，当前同样为10。DDS还针对2026-10-06的
+0°相位实测数据加入板级补偿：`DDS_PHASE_CALIBRATION_LAG_CDEG=196`，
+`DDS_PHASE_CALIBRATION_DELAY_SAMPLES=2`。数据覆盖1～100 kHz的21个测点，
+输出超前2.1°～4.8°；补偿相当于额外滞后
+`1.96° + 360° × 频率 × 2 / 25 MHz`。该简化模型在测点上的均方根
+残差约0.16°，最大绝对残差约0.40°。补偿只用于DDS模式，不改变PC设定的
+目标滞后角，也不改变流水线延迟模式。更换比较器或模拟链路后应重新测量。
 
 DDS只在首次捕获时对齐相位，并用幅度渐入隐藏捕获瞬态。锁定后，比较器边沿误差
 只修改后续的相位步进，绝不跳变相位累加器；PI增益按实测周期点数自动缩放，
