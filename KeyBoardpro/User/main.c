@@ -99,7 +99,7 @@ int main(void)
     uint16_t flags;
     uint16_t targetPhase = MEASUREMENT_DEFAULT_PHASE_CDEG;
     uint16_t requestedPhase;
-    uint8_t targetMode = MEASUREMENT_MODE_PIPELINE;
+    uint8_t targetMode = MEASUREMENT_MODE_DDS;
     uint8_t requestedMode;
     uint16_t delaySamples;
     uint16_t activeDelay = 0xFFFFU;

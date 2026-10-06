@@ -54,6 +54,8 @@ set_global_assignment -name VERILOG_FILE ad9226_capture.v
 set_global_assignment -name VERILOG_FILE variable_sample_delay.v
 set_global_assignment -name VERILOG_FILE sine_rom_1024.v
 set_global_assignment -name VERILOG_FILE zero_crossing_dds.v
+set_global_assignment -name VERILOG_FILE comparator_frequency_meter.v
+set_global_assignment -name VERILOG_FILE six_digit_frequency_display.v
 set_global_assignment -name VERILOG_FILE adc_dac_voltage_mapper.v
 set_global_assignment -name VERILOG_FILE dac904_output.v
 set_global_assignment -name VERILOG_FILE ads805.v
@@ -84,6 +86,24 @@ set_location_assignment PIN_M9 -to adc_clk
 set_location_assignment PIN_N6 -to adc_otr
 set_location_assignment PIN_R13 -to uart_tx
 set_location_assignment PIN_T13 -to uart_rx
+set_location_assignment PIN_T14 -to comparator_in
+
+# MINI_FPGA manual Table 1.4: DIG1..DIG6 are left to right. Segments are
+# active high; the six digit selects are active low.
+set_location_assignment PIN_D9 -to digitron_out[0]
+set_location_assignment PIN_E10 -to digitron_out[1]
+set_location_assignment PIN_E8 -to digitron_out[2]
+set_location_assignment PIN_D11 -to digitron_out[3]
+set_location_assignment PIN_C8 -to digitron_out[4]
+set_location_assignment PIN_D8 -to digitron_out[5]
+set_location_assignment PIN_E9 -to digitron_out[6]
+set_location_assignment PIN_C9 -to digitron_out[7]
+set_location_assignment PIN_C14 -to digitron_cs_n[0]
+set_location_assignment PIN_D14 -to digitron_cs_n[1]
+set_location_assignment PIN_G11 -to digitron_cs_n[2]
+set_location_assignment PIN_F11 -to digitron_cs_n[3]
+set_location_assignment PIN_C11 -to digitron_cs_n[4]
+set_location_assignment PIN_D12 -to digitron_cs_n[5]
 
 # DAC904 wiring: Bit 1 is D13 (MSB), Bit 14 is D0 (LSB).
 set_location_assignment PIN_A8 -to dac_clk
@@ -110,6 +130,9 @@ set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to dac_clk
 set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to dac_data[*]
 set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to uart_tx
 set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to uart_rx
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to comparator_in
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to digitron_out[*]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to digitron_cs_n[*]
 set_global_assignment -name RESERVE_ALL_UNUSED_PINS "AS INPUT TRI-STATED"
 
 set_global_assignment -name RESERVE_ALL_UNUSED_PINS_NO_OUTPUT_GND "AS INPUT TRI-STATED"

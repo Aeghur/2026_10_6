@@ -63,10 +63,10 @@ class ScopeApp:
         ).pack(side=tk.LEFT)
         ttk.Label(bar, text="°").pack(side=tk.LEFT)
         ttk.Label(bar, text="输出模式").pack(side=tk.LEFT, padx=(12, 3))
-        self.mode_var = tk.StringVar(value="流水线延迟")
+        self.mode_var = tk.StringVar(value="比较器锁相DDS")
         self.mode_box = ttk.Combobox(
             bar, textvariable=self.mode_var, width=12, state="readonly",
-            values=("流水线延迟", "过零锁相DDS")
+            values=("流水线延迟", "比较器锁相DDS")
         )
         self.mode_box.pack(side=tk.LEFT)
         ttk.Label(bar, text="频谱单位").pack(side=tk.LEFT, padx=(18, 3))
@@ -140,7 +140,7 @@ class ScopeApp:
             self.status.set("目标相位必须位于0～359.99°")
             return
         phase_cdeg = int(round(phase * 100.0))
-        mode = 1 if self.mode_var.get() == "过零锁相DDS" else 0
+        mode = 1 if self.mode_var.get() == "比较器锁相DDS" else 0
         try:
             self.serial.write(encode_frame(
                 TYPE_PC_SET_MODE, self.sequence, bytes((mode,))

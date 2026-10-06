@@ -1,15 +1,14 @@
 // Lightweight phase-anchored DDS for a single sine input.
 //
-// The MSPM0 supplies the frequency-derived phase step and requested lag.
-// A hysteretic positive-going zero crossing keeps the NCO phase referenced
-// to the live AD9226 input.  The phase accumulator is never stepped after
+// T14 measurement supplies the frequency-derived phase step. The MSPM0
+// supplies the requested lag. A clean comparator rising edge keeps the NCO
+// phase referenced to the live input. The accumulator is never stepped after
 // acquisition: a lightweight type-II loop instead adjusts its increment so
 // phase corrections remain continuous at the DAC.  The input peak envelope
 // is tracked locally so the generated waveform follows the input amplitude.
 module zero_crossing_dds #(
     parameter integer ADC_ZERO_CODE = 2104,
     parameter integer SAMPLE_HZ = 25_000_000,
-    parameter integer HYSTERESIS_CODES = 8,
     parameter integer SIGNAL_THRESHOLD_CODES = 16,
     parameter integer LOOP_KP_EXTRA_SHIFT = 2,
     parameter integer LOOP_KI_EXTRA_SHIFT = 6,
@@ -24,6 +23,7 @@ module zero_crossing_dds #(
     input  wire        config_valid,
     input  wire [31:0] config_phase_step,
     input  wire [31:0] config_phase_lag,
+    input  wire        reference_edge,
     input  wire        sample_valid,
     input  wire [11:0] sample_data,
     output reg         output_valid = 1'b0,
@@ -42,7 +42,7 @@ module zero_crossing_dds #(
     reg signed [32:0] loop_error_shift = 33'sd0;
     reg [4:0] loop_shift_count = 5'd0;
     reg loop_update_pending = 1'b0;
-    reg crossing_armed = 1'b0;
+    reg reference_pending = 1'b0;
     reg [15:0] samples_since_crossing = 16'hffff;
 
     localparam signed [12:0] ADC_ZERO_SIGNED = ADC_ZERO_CODE[12:0];
@@ -85,6 +85,13 @@ module zero_crossing_dds #(
 
     wire [4:0] period_shift = period_log2_ceil(samples_since_crossing);
     wire signed [31:0] crossing_phase_error = -$signed(carrier_phase);
+    wire reference_crossing = reference_pending || reference_edge;
+    wire [31:0] phase_step_change =
+        (config_phase_step >= phase_step) ?
+        (config_phase_step - phase_step) : (phase_step - config_phase_step);
+    wire reacquire = config_valid &&
+        (config_phase_step == 0 ||
+         phase_step_change > (phase_step >> 4));
     wire signed [32:0] extended_phase_error =
         {crossing_phase_error[31], crossing_phase_error};
     wire signed [32:0] proportional_adjust =
@@ -135,12 +142,14 @@ module zero_crossing_dds #(
             loop_error_shift <= 33'sd0;
             loop_shift_count <= 5'd0;
             loop_update_pending <= 1'b0;
-            crossing_armed <= 1'b0;
+            reference_pending <= 1'b0;
             samples_since_crossing <= 16'hffff;
             envelope <= 12'd0;
             decay_count <= 12'd0;
             locked <= 1'b0;
         end else begin
+            if (reference_edge)
+                reference_pending <= 1'b1;
             // Period normalization is performed serially because loop
             // updates occur only once per input cycle.  Even at 110 kHz
             // there are hundreds of 50 MHz clocks available, avoiding a
@@ -164,7 +173,7 @@ module zero_crossing_dds #(
             if (config_valid) begin
                 phase_step <= config_phase_step;
                 phase_lag <= config_phase_lag;
-                if (config_phase_step == 0) begin
+                if (reacquire) begin
                     locked <= 1'b0;
                     frequency_trim <= 33'sd0;
                     proportional_trim <= 33'sd0;
@@ -201,24 +210,20 @@ module zero_crossing_dds #(
                     samples_since_crossing <= samples_since_crossing + 1'b1;
                     if (samples_since_crossing > LOST_CROSSING_SAMPLES) begin
                         // Mark the timeout as handled.  Leaving the saturated
-                        // age above the threshold would clear crossing_armed
+                        // age above the threshold would repeat the timeout
                         // on every sample and prevent low-frequency reacquire.
                         samples_since_crossing <= 16'hffff;
                         locked <= 1'b0;
                         frequency_trim <= 33'sd0;
                         proportional_trim <= 33'sd0;
                         loop_update_pending <= 1'b0;
-                        crossing_armed <= 1'b0;
                     end
                 end
 
-                if (sample_data <= ADC_ZERO_CODE - HYSTERESIS_CODES)
-                    crossing_armed <= 1'b1;
-
-                if (crossing_armed && sample_data >= ADC_ZERO_CODE) begin
-                    crossing_armed <= 1'b0;
+                if (reference_crossing) begin
+                    reference_pending <= 1'b0;
                     samples_since_crossing <= 16'd0;
-                    if (signal_present && phase_step != 0) begin
+                    if (signal_present && phase_step != 0 && !reacquire) begin
                         if (!locked) begin
                             // This one-time acquisition alignment is hidden
                             // by the output amplitude ramp.  After lock, the
@@ -239,8 +244,8 @@ module zero_crossing_dds #(
                 // Exactly one normal accumulator update per sample.  Loop
                 // corrections alter phase slope rather than phase value, so
                 // the sine-ROM address remains continuous at every crossing.
-                if (!(crossing_armed && sample_data >= ADC_ZERO_CODE &&
-                      signal_present && phase_step != 0 && !locked))
+                if (!(reference_crossing && signal_present &&
+                      phase_step != 0 && !locked && !reacquire))
                     carrier_phase <= carrier_phase + phase_increment_wide[31:0];
             end
         end
@@ -290,8 +295,8 @@ module zero_crossing_dds #(
     end
 
     initial begin
-        if (ADC_ZERO_CODE <= HYSTERESIS_CODES || ADC_ZERO_CODE > 4095)
-            $display("ERROR: invalid zero-crossing threshold");
+        if (ADC_ZERO_CODE < 0 || ADC_ZERO_CODE > 4095)
+            $display("ERROR: invalid ADC zero code");
         if (LOST_CROSSING_SAMPLES > 65534)
             $display("ERROR: lost-crossing counter is too small");
     end

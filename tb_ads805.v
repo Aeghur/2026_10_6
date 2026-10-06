@@ -5,10 +5,13 @@ module tb_ads805;
     reg clk = 0;
     reg [11:0] adc_data = 0;
     reg adc_otr = 0;
+    reg comparator_in = 0;
     reg uart_rx = 1;
     wire adc_clk;
     wire dac_clk;
     wire [13:0] dac_data;
+    wire [7:0] digitron_out;
+    wire [5:0] digitron_cs_n;
     wire uart_tx;
 
     reg [7:0] frame [0:FRAME_LENGTH-1];
@@ -80,7 +83,9 @@ module tb_ads805;
         .CAPTURE_SAMPLES(TEST_SAMPLES)
     ) dut (
         .clk_50m(clk), .adc_data(adc_data), .adc_otr(adc_otr),
+        .comparator_in(comparator_in),
         .adc_clk(adc_clk), .dac_clk(dac_clk), .dac_data(dac_data),
+        .digitron_out(digitron_out), .digitron_cs_n(digitron_cs_n),
         .uart_tx(uart_tx), .uart_rx(uart_rx)
     );
 

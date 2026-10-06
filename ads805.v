@@ -17,9 +17,12 @@ module ads805 #(
     input  wire        clk_50m,
     input  wire [11:0] adc_data,
     input  wire        adc_otr,
+    input  wire        comparator_in,
     output wire        adc_clk,
     output wire        dac_clk,
     output wire [13:0] dac_data,
+    output wire [7:0]  digitron_out,
+    output wire [5:0]  digitron_cs_n,
     output wire        uart_tx,
     input  wire        uart_rx
 );
@@ -65,10 +68,34 @@ module ads805 #(
         .delayed_data(delayed_sample_data)
     );
 
-    // Mode 0 retains the original sample-delay pipeline.  Mode 1 regenerates
+    // The T14 comparator determines DDS frequency and the displayed hertz.
+    // Its rising edges also replace the ADC's approximate zero crossing as
+    // the phase reference. The ADC remains the amplitude source.
+    wire comparator_rising_edge;
+    wire measured_frequency_valid;
+    wire [16:0] measured_frequency_hz;
+    wire [31:0] measured_phase_step;
+    comparator_frequency_meter #(
+        .CLK_HZ(CLK_HZ), .SAMPLE_HZ(SAMPLE_HZ)
+    ) frequency_meter_inst (
+        .clk(clk_50m), .rst(rst), .comparator_in(comparator_in),
+        .rising_edge(comparator_rising_edge),
+        .frequency_valid(measured_frequency_valid),
+        .frequency_hz(measured_frequency_hz),
+        .phase_step(measured_phase_step)
+    );
+    six_digit_frequency_display #(.CLK_HZ(CLK_HZ)) display_inst (
+        .clk(clk_50m), .rst(rst),
+        .frequency_valid(measured_frequency_valid),
+        .frequency_hz(measured_frequency_hz),
+        .digitron_out(digitron_out),
+        .digitron_cs_n(digitron_cs_n)
+    );
+
+    // Mode 0 retains the original sample-delay pipeline. Mode 1 regenerates
     // a clean sine with a phase-anchored DDS.  The delay RAM continues to run
     // in both modes, so returning to mode 0 does not require a refill pause.
-    reg output_mode_dds = 1'b0;
+    reg output_mode_dds = 1'b1;
     reg dds_config_valid = 1'b0;
     reg [31:0] configured_phase_step = 32'd0;
     reg [31:0] configured_phase_lag = 32'd0;
@@ -82,9 +109,10 @@ module ads805 #(
         .PIPELINE_ADVANCE_SAMPLES(DDS_PIPELINE_ADVANCE_SAMPLES)
     ) zero_crossing_dds_inst (
         .clk(clk_50m), .rst(rst), .enable(output_mode_dds),
-        .config_valid(dds_config_valid),
-        .config_phase_step(configured_phase_step),
+        .config_valid(dds_config_valid || measured_frequency_valid),
+        .config_phase_step(measured_phase_step),
         .config_phase_lag(configured_phase_lag),
+        .reference_edge(comparator_rising_edge),
         .sample_valid(sample_strobe), .sample_data(sample_data),
         .output_valid(dds_sample_valid), .output_sample(dds_sample_data),
         .locked(dds_locked), .signal_present(dds_signal_present)
@@ -136,7 +164,9 @@ module ads805 #(
     endfunction
 
     // Receive CAPTURE (0x01), SET_DELAY (0x03) and SET_OUTPUT (0x04).
-    // SET_OUTPUT payload: mode:u8, phase_step:u32LE, phase_lag:u32LE.
+    // SET_OUTPUT payload remains mode:u8, phase_step:u32LE, phase_lag:u32LE.
+    // Its phase_step field is accepted for protocol compatibility but is not
+    // used: T14 is the sole frequency source in DDS mode.
     wire [7:0] rx_byte;
     wire rx_valid;
     wire rx_framing_error;

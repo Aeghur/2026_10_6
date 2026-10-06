@@ -25,6 +25,12 @@ set_output_delay -clock dac_latch_clk -min -1.500 [get_ports {dac_data[*]}]
 set_false_path -to [get_ports {uart_tx}]
 set_false_path -from [get_ports {uart_rx}]
 
+# T14 is asynchronous; the first two 50 MHz registers synchronize it.
+set_false_path -from [get_ports {comparator_in}]
+
+# Multiplexed seven-segment outputs have no board-synchronous receiver clock.
+set_false_path -to [get_ports {digitron_out[*] digitron_cs_n[*]}]
+
 # adc_clk is itself the forwarded sampling clock, not data captured by another
 # board-level clock. Its period and pulse width are covered by adc_sample_clk.
 set_false_path -to [get_ports {adc_clk}]

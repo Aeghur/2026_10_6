@@ -16,6 +16,7 @@ module tb_zero_crossing_dds #(
     reg [31:0] config_phase_step = PHASE_STEP;
     reg [31:0] config_phase_lag = 0;
     reg sample_valid = 0;
+    reg reference_edge = 0;
     reg [11:0] sample_data = 12'd2104;
     wire output_valid;
     wire [11:0] output_sample;
@@ -33,7 +34,6 @@ module tb_zero_crossing_dds #(
     integer previous_output = 2104;
     integer maximum_step = 0;
     integer output_step = 0;
-    integer arm_samples = 0;
     integer crossing_samples = 0;
     real angle;
     real sample_real;
@@ -49,6 +49,7 @@ module tb_zero_crossing_dds #(
         .config_valid(config_valid),
         .config_phase_step(config_phase_step),
         .config_phase_lag(config_phase_lag),
+        .reference_edge(reference_edge),
         .sample_valid(sample_valid), .sample_data(sample_data),
         .output_valid(output_valid), .output_sample(output_sample),
         .locked(locked), .signal_present(signal_present)
@@ -63,6 +64,7 @@ module tb_zero_crossing_dds #(
         .config_valid(config_valid),
         .config_phase_step(config_phase_step),
         .config_phase_lag(32'h80000000),
+        .reference_edge(reference_edge),
         .sample_valid(sample_valid), .sample_data(sample_data),
         .output_valid(output_valid_180),
         .output_sample(output_sample_180),
@@ -71,10 +73,13 @@ module tb_zero_crossing_dds #(
 
     always @(posedge clk) begin
         sample_valid <= ~sample_valid;
+        reference_edge <= 1'b0;
         if (!sample_valid) begin
             angle = 6.283185307179586 * TONE_HZ * sample_index / SAMPLE_HZ;
             sample_real = 2104.0 + 500.0 * $sin(angle);
             sample_data <= $rtoi(sample_real);
+            if (sample_index % (SAMPLE_HZ / TONE_HZ) == 0)
+                reference_edge <= 1'b1;
             sample_index <= sample_index + 1;
         end
         if (output_valid) begin
@@ -94,9 +99,7 @@ module tb_zero_crossing_dds #(
                  output_sample + output_sample_180 > 4210))
                 inversion_errors <= inversion_errors + 1;
         end
-        if (sample_valid && sample_data <= 2096)
-            arm_samples <= arm_samples + 1;
-        if (sample_valid && dut.crossing_armed && sample_data >= 2104)
+        if (reference_edge)
             crossing_samples <= crossing_samples + 1;
     end
 
@@ -110,10 +113,10 @@ module tb_zero_crossing_dds #(
         repeat (TEST_SAMPLES * 2) @(posedge clk);
         if (!signal_present || !locked || !signal_present_180 ||
             !locked_180) begin
-            $display("FAIL: DDS acquire signal=%0d lock=%0d envelope=%0d armed=%0d age=%0d samples=%0d step=%0d arm=%0d cross=%0d",
+            $display("FAIL: DDS acquire signal=%0d lock=%0d envelope=%0d age=%0d samples=%0d step=%0d cross=%0d",
                      signal_present, locked, dut.envelope,
-                     dut.crossing_armed, dut.samples_since_crossing,
-                     sample_index, dut.phase_step, arm_samples,
+                     dut.samples_since_crossing,
+                     sample_index, dut.phase_step,
                      crossing_samples);
             $finish;
         end
