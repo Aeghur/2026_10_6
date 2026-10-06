@@ -52,12 +52,17 @@ set_global_assignment -name EDA_TIME_SCALE "1 ps" -section_id eda_simulation
 set_global_assignment -name EDA_OUTPUT_DATA_FORMAT "VERILOG HDL" -section_id eda_simulation
 set_global_assignment -name VERILOG_FILE ad9226_capture.v
 set_global_assignment -name VERILOG_FILE variable_sample_delay.v
+set_global_assignment -name VERILOG_FILE sine_rom_1024.v
+set_global_assignment -name VERILOG_FILE zero_crossing_dds.v
 set_global_assignment -name VERILOG_FILE adc_dac_voltage_mapper.v
 set_global_assignment -name VERILOG_FILE dac904_output.v
 set_global_assignment -name VERILOG_FILE ads805.v
 set_global_assignment -name VERILOG_FILE uart_tx.v
 set_global_assignment -name VERILOG_FILE uart_rx.v
 set_global_assignment -name SDC_FILE ads805.sdc
+set_global_assignment -name HEX_FILE dpll_dds_fpga/rtl/sine_1024x16.hex
+set_global_assignment -name MIF_FILE sine_1024x16.mif
+set_global_assignment -name VERILOG_MACRO "QUARTUS_SYNTHESIS=1"
 
 # MINI_FPGA onboard 50 MHz oscillator (manual Table 1.6).
 set_location_assignment PIN_E1 -to clk_50m
@@ -111,6 +116,7 @@ set_global_assignment -name RESERVE_ALL_UNUSED_PINS_NO_OUTPUT_GND "AS INPUT TRI-
 set_global_assignment -name PARTITION_NETLIST_TYPE SOURCE -section_id Top
 set_global_assignment -name PARTITION_FITTER_PRESERVATION_LEVEL PLACEMENT_AND_ROUTING -section_id Top
 set_global_assignment -name PARTITION_COLOR 16764057 -section_id Top
+
 
 
 

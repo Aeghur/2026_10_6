@@ -4,6 +4,7 @@
 
 #define FRAME_TYPE_CAPTURE (0x10U)
 #define FRAME_TYPE_SET_PHASE (0x11U)
+#define FRAME_TYPE_SET_MODE  (0x12U)
 #define FRAME_TYPE_RESULT  (0x90U)
 #define FRAME_TYPE_ERROR   (0xE0U)
 #define RESULT_PAYLOAD_SIZE \
@@ -14,6 +15,8 @@ static volatile bool gCapturePending;
 static volatile uint8_t gCaptureSequence;
 static volatile bool gPhasePending;
 static volatile uint16_t gPhaseCentiDegrees;
+static volatile bool gModePending;
+static volatile uint8_t gOutputMode;
 static uint8_t gRxState;
 static uint8_t gRxType;
 static uint8_t gRxSequence;
@@ -80,9 +83,23 @@ void PC_Link_Init(void)
 {
     gCapturePending = false;
     gPhasePending = false;
+    gModePending = false;
     gRxState = 0U;
     NVIC_ClearPendingIRQ(PC_UART_INST_INT_IRQN);
     NVIC_EnableIRQ(PC_UART_INST_INT_IRQN);
+}
+
+bool PC_Link_TakeModeRequest(uint8_t *mode)
+{
+    __disable_irq();
+    if (!gModePending) {
+        __enable_irq();
+        return false;
+    }
+    *mode = gOutputMode;
+    gModePending = false;
+    __enable_irq();
+    return true;
 }
 
 bool PC_Link_TakePhaseRequest(uint16_t *phaseCentiDegrees)
@@ -159,7 +176,8 @@ void UART1_IRQHandler(void)
                 break;
             case 2:
                 if (value == FRAME_TYPE_CAPTURE ||
-                    value == FRAME_TYPE_SET_PHASE) {
+                    value == FRAME_TYPE_SET_PHASE ||
+                    value == FRAME_TYPE_SET_MODE) {
                     gRxType = value;
                     gRxCrc = crc16Update(0xFFFFU, value);
                     gRxLength = 0U;
@@ -181,7 +199,12 @@ void UART1_IRQHandler(void)
             case 5:
                 gRxCrc = crc16Update(gRxCrc, value);
                 if (value != 0U ||
-                    (gRxLength != 0U && gRxLength != 2U)) {
+                    (gRxType == FRAME_TYPE_CAPTURE &&
+                     gRxLength != 0U) ||
+                    (gRxType == FRAME_TYPE_SET_PHASE &&
+                     gRxLength != 2U) ||
+                    (gRxType == FRAME_TYPE_SET_MODE &&
+                     gRxLength != 1U)) {
                     gRxState = 0U;
                 } else if (gRxLength == 0U) {
                     gRxState = 8U;
@@ -190,9 +213,15 @@ void UART1_IRQHandler(void)
                 }
                 break;
             case 6:
-                gRxPayloadLow = value;
                 gRxCrc = crc16Update(gRxCrc, value);
-                gRxState = 7U;
+                if (gRxType == FRAME_TYPE_SET_MODE &&
+                    gRxLength == 1U) {
+                    gOutputMode = value;
+                    gRxState = 8U;
+                } else {
+                    gRxPayloadLow = value;
+                    gRxState = 7U;
+                }
                 break;
             case 7:
                 gPhaseCentiDegrees =
@@ -214,6 +243,10 @@ void UART1_IRQHandler(void)
                                gRxLength == 2U &&
                                gPhaseCentiDegrees < 36000U) {
                         gPhasePending = true;
+                    } else if (gRxType == FRAME_TYPE_SET_MODE &&
+                               gRxLength == 1U &&
+                               gOutputMode <= MEASUREMENT_MODE_DDS) {
+                        gModePending = true;
                     }
                 }
                 gRxState = 0U;

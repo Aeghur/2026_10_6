@@ -4,8 +4,10 @@
 
 ```text
 AD9226 25 MSPS → FPGA抽取采集 → MSPM0单峰FFT
-       │                              ↓ 频率、目标相位
-       └→ FPGA 8192点可变延迟 → 标定映射 → DAC904 25 MSPS
+       │                              ↓ 频率、目标相位、模式
+       ├→ FPGA 8192点可变延迟 ─────────────┐
+       └→ 过零相位检测 → 连续相位PI-DPLL → 32位DDS → 正弦ROM ├→ 标定映射 → DAC904
+                                           ↑ 模式选择
 
 PC 1 Mbaud ↔ MSPM0 ↔ FPGA 2 Mbaud
 ```
@@ -22,7 +24,9 @@ PC 1 Mbaud ↔ MSPM0 ↔ FPGA 2 Mbaud
 6. FPGA继续以25 MSPS输出延迟后的信号，不因FFT和串口传输而中断。
 7. PC请求测量时，MSPM0返回最近一次完整结果。
 
-默认目标为滞后90°，PC界面可设置 `0～359.99°`。
+默认目标为滞后90°，PC界面可设置 `0～359.99°`，并可在“流水线延迟”
+和“过零锁相DDS”之间切换。延迟RAM在DDS模式下仍持续写入，切回流水线
+无需重新填充。
 
 ## 关键参数
 
@@ -50,6 +54,9 @@ Quartus工程为 `ads805.qpf`，器件为 `EP4CE6F17C8`。
 |---|---|
 | `ad9226_capture.v` | 25 MSPS ADC采集 |
 | `variable_sample_delay.v` | 8192点整数可变延迟RAM |
+| `zero_crossing_dds.v` | 迟滞过零、自适应PI环、连续相位DDS和包络跟踪 |
+| `sine_rom_1024.v` | 仿真模型及Cyclone IV M9K正弦ROM封装 |
+| `sine_1024x16.mif` | 1024点Q1.15正弦表 |
 | `adc_dac_voltage_mapper.v` | 零点、增益、反相和饱和映射 |
 | `dac904_output.v` | DAC904锁存时序 |
 | `ads805.v` | 抽取缓存、协议和数据链路顶层 |
@@ -90,7 +97,15 @@ Keil工程：`KeyBoardpro/Project/empty.uvprojx`。
 | `measurement_config.h` | 频率范围、采样率、延迟深度和固定延迟 |
 | `main.c` | 自动跟踪和延迟计算主循环 |
 
-`MEASUREMENT_FIXED_LATENCY_SAMPLES` 当前初值为10。它代表未启用附加延迟时，从ADC模拟输入到DAC模拟输出的等效25 MSPS采样点数。首次上板必须用示波器测量后修正该值，否则目标相位会存在固定偏差。
+`MEASUREMENT_FIXED_LATENCY_SAMPLES` 当前初值为10。它代表流水线路径从ADC
+模拟输入到DAC模拟输出的等效25 MSPS采样点数。DDS路径对应顶层参数
+`DDS_PIPELINE_ADVANCE_SAMPLES`，当前同样为10。两种模式应分别用示波器校准，
+否则目标相位会存在随频率线性增加的固定延迟误差。
+
+DDS只在首次捕获时对齐相位，并用幅度渐入隐藏捕获瞬态。锁定后，过零误差
+只修改后续的相位步进，绝不跳变相位累加器；PI增益按实测周期点数自动缩放，
+以覆盖0.9～110 kHz。运行中修改目标相位也会限速过渡，避免DAC码突然跳变。
+FFT提供粗频率，FPGA过零环负责连续细跟踪，因此稳定输出不会被FFT帧间隔切断。
 
 ## PC界面
 
@@ -99,12 +114,13 @@ python -m pip install -r requirements.txt
 python scope.py
 ```
 
-选择MSPM0串口，填写目标滞后角，连接后点击“单次采集”。界面显示：
+选择MSPM0串口，填写目标滞后角和输出模式，连接后点击“单次采集”。界面显示：
 
 - 4096点抽取时域波形；
 - 0～110 kHz频谱；
 - 自动测得的单频频率；
 - OTR、DAC削顶、CRC和调相范围状态。
+- 当前输出模式，以及DDS的输入信号和锁定状态。
 
 独立DPLL/DDS工程建议改用实时诊断脚本，它不会显示占位波形，而是直接读取
 FPGA的锁定状态和环路相位误差：
@@ -136,11 +152,19 @@ python -m unittest -v test_protocol.py
 iverilog -g2012 -o tb_delay.out variable_sample_delay.v tb_variable_sample_delay.v
 vvp tb_delay.out
 
-iverilog -g2012 -o tb.out ad9226_capture.v variable_sample_delay.v adc_dac_voltage_mapper.v dac904_output.v uart_tx.v uart_rx.v ads805.v tb_ads805.v
+iverilog -g2012 -o tb_dds.out sine_rom_1024.v zero_crossing_dds.v tb_zero_crossing_dds.v
+vvp tb_dds.out
+
+iverilog -g2012 -o tb.out ad9226_capture.v variable_sample_delay.v sine_rom_1024.v zero_crossing_dds.v adc_dac_voltage_mapper.v dac904_output.v uart_tx.v uart_rx.v ads805.v tb_ads805.v
 vvp tb.out
 ```
 
 ## 调相范围限制
+
+“流水线延迟”模式仍受以下RAM深度限制。“过零锁相DDS”模式以32位相位字
+直接设置输出相位，不受8192点延迟深度限制，可在0.9～110 kHz范围设置任意
+目标角。DDS必须检测到幅度超过门限的正向过零后才输出；未锁定或输入消失时
+DAC回到标定零点，避免保持未知波形。
 
 算法按照下式计算总延迟：
 

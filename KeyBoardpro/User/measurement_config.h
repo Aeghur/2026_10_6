@@ -19,6 +19,12 @@
 #define MEASUREMENT_FLAG_OTR           (0x0001U)
 #define MEASUREMENT_FLAG_DAC_CLIP      (0x0002U)
 #define MEASUREMENT_FLAG_PHASE_RANGE   (0x0004U)
+#define MEASUREMENT_FLAG_DDS_MODE      (0x0008U)
+#define MEASUREMENT_FLAG_DDS_LOCKED    (0x0010U)
+#define MEASUREMENT_FLAG_DDS_SIGNAL    (0x0020U)
+
+#define MEASUREMENT_MODE_PIPELINE      (0U)
+#define MEASUREMENT_MODE_DDS           (1U)
 
 typedef struct {
     uint32_t frequencyMilliHz;

@@ -167,8 +167,49 @@ module tb_ads805;
             errors = errors + 1;
         end
 
+        // Switch to zero-crossing DDS mode. Payload is mode, phase step and
+        // phase lag, all covered by the same CRC as the delay command.
+        calculated_crc = 16'hffff;
+        calculated_crc = crc16_next(calculated_crc, 8'h04);
+        calculated_crc = crc16_next(calculated_crc, 8'h39);
+        calculated_crc = crc16_next(calculated_crc, 8'h09);
+        calculated_crc = crc16_next(calculated_crc, 8'h00);
+        calculated_crc = crc16_next(calculated_crc, 8'h01);
+        calculated_crc = crc16_next(calculated_crc, 8'h44);
+        calculated_crc = crc16_next(calculated_crc, 8'h33);
+        calculated_crc = crc16_next(calculated_crc, 8'h22);
+        calculated_crc = crc16_next(calculated_crc, 8'h11);
+        calculated_crc = crc16_next(calculated_crc, 8'h88);
+        calculated_crc = crc16_next(calculated_crc, 8'h77);
+        calculated_crc = crc16_next(calculated_crc, 8'h66);
+        calculated_crc = crc16_next(calculated_crc, 8'h55);
+        send_uart_byte(8'ha5);
+        send_uart_byte(8'h5a);
+        send_uart_byte(8'h04);
+        send_uart_byte(8'h39);
+        send_uart_byte(8'h09);
+        send_uart_byte(8'h00);
+        send_uart_byte(8'h01);
+        send_uart_byte(8'h44);
+        send_uart_byte(8'h33);
+        send_uart_byte(8'h22);
+        send_uart_byte(8'h11);
+        send_uart_byte(8'h88);
+        send_uart_byte(8'h77);
+        send_uart_byte(8'h66);
+        send_uart_byte(8'h55);
+        send_uart_byte(calculated_crc[7:0]);
+        send_uart_byte(calculated_crc[15:8]);
+        #1000;
+        if (dut.output_mode_dds !== 1'b1 ||
+            dut.configured_phase_step !== 32'h11223344 ||
+            dut.configured_phase_lag !== 32'h55667788) begin
+            $display("FAIL: DDS output configuration was not applied");
+            errors = errors + 1;
+        end
+
         if (errors == 0)
-            $display("PASS: MSPM0 capture, CRC and phase-delay command");
+            $display("PASS: capture, delay and switchable DDS commands");
         else
             $display("FAIL: %0d errors", errors);
         $finish;

@@ -7,6 +7,7 @@ from protocol import (
     TYPE_ERROR,
     TYPE_PC_CAPTURE,
     TYPE_PC_SET_PHASE,
+    TYPE_PC_SET_MODE,
     TYPE_PC_RESULT,
     crc16_ccitt,
     decode_error,
@@ -45,6 +46,12 @@ class ProtocolTests(unittest.TestCase):
         frame = FrameDecoder().feed(encoded)[0]
         self.assertEqual(frame.frame_type, TYPE_PC_SET_PHASE)
         self.assertEqual(int.from_bytes(frame.payload, "little"), 9000)
+
+    def test_mode_configuration_layout(self) -> None:
+        encoded = encode_frame(TYPE_PC_SET_MODE, 4, b"\x01")
+        frame = FrameDecoder().feed(encoded)[0]
+        self.assertEqual(frame.frame_type, TYPE_PC_SET_MODE)
+        self.assertEqual(frame.payload, b"\x01")
 
     def test_result_layout(self) -> None:
         samples = (2000, 2048, 2100, 2048)

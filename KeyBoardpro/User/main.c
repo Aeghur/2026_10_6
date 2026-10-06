@@ -11,14 +11,31 @@
 
 static uint16_t gSamples[MEASUREMENT_FFT_SIZE];
 
-static bool calculateDelay(
-    uint32_t frequencyMilliHz, uint16_t phaseCentiDegrees,
-    uint16_t *delaySamples)
+static bool normalizeFrequency(uint32_t *frequencyMilliHz)
 {
     const uint32_t minimumMilliHz =
         MEASUREMENT_MIN_SPECTRUM_HZ * 1000UL;
     const uint32_t maximumMilliHz =
         MEASUREMENT_MAX_SPECTRUM_HZ * 1000UL;
+
+    if (*frequencyMilliHz < minimumMilliHz) {
+        if (minimumMilliHz - *frequencyMilliHz >
+            MEASUREMENT_EDGE_TOLERANCE_MILLIHZ)
+            return false;
+        *frequencyMilliHz = minimumMilliHz;
+    } else if (*frequencyMilliHz > maximumMilliHz) {
+        if (*frequencyMilliHz - maximumMilliHz >
+            MEASUREMENT_EDGE_TOLERANCE_MILLIHZ)
+            return false;
+        *frequencyMilliHz = maximumMilliHz;
+    }
+    return true;
+}
+
+static bool calculateDelay(
+    uint32_t frequencyMilliHz, uint16_t phaseCentiDegrees,
+    uint16_t *delaySamples)
+{
     uint64_t periodQ16;
     uint64_t targetQ16;
     uint64_t fixedQ16 =
@@ -34,17 +51,8 @@ static bool calculateDelay(
     // Hann-window peak interpolation can cross a configured band edge by a
     // fraction of a bin.  Accept up to two FFT bins and clamp to the promised
     // 0.9 kHz..110 kHz input range; reject larger excursions deterministically.
-    if (frequencyMilliHz < minimumMilliHz) {
-        if (minimumMilliHz - frequencyMilliHz >
-            MEASUREMENT_EDGE_TOLERANCE_MILLIHZ)
-            return false;
-        frequencyMilliHz = minimumMilliHz;
-    } else if (frequencyMilliHz > maximumMilliHz) {
-        if (frequencyMilliHz - maximumMilliHz >
-            MEASUREMENT_EDGE_TOLERANCE_MILLIHZ)
-            return false;
-        frequencyMilliHz = maximumMilliHz;
-    }
+    if (!normalizeFrequency(&frequencyMilliHz))
+        return false;
     periodQ16 =
         (((uint64_t) MEASUREMENT_ADC_RATE_HZ * 1000ULL) << 16) /
         frequencyMilliHz;
@@ -63,6 +71,27 @@ static bool calculateDelay(
     return true;
 }
 
+static bool calculateDDSWords(
+    uint32_t frequencyMilliHz, uint16_t phaseCentiDegrees,
+    uint32_t *phaseStep, uint32_t *phaseLag)
+{
+    const uint64_t phaseTurn = 0x100000000ULL;
+    const uint64_t rateMilliHz =
+        (uint64_t) MEASUREMENT_ADC_RATE_HZ * 1000ULL;
+
+    *phaseStep = 0U;
+    *phaseLag = 0U;
+    if (!normalizeFrequency(&frequencyMilliHz))
+        return false;
+
+    *phaseStep = (uint32_t)
+        (((uint64_t) frequencyMilliHz * phaseTurn + rateMilliHz / 2U) /
+         rateMilliHz);
+    *phaseLag = (uint32_t)
+        (((uint64_t) phaseCentiDegrees * phaseTurn + 18000U) / 36000U);
+    return true;
+}
+
 int main(void)
 {
     MeasurementPeak peaks[MEASUREMENT_PEAK_COUNT];
@@ -70,8 +99,13 @@ int main(void)
     uint16_t flags;
     uint16_t targetPhase = MEASUREMENT_DEFAULT_PHASE_CDEG;
     uint16_t requestedPhase;
+    uint8_t targetMode = MEASUREMENT_MODE_PIPELINE;
+    uint8_t requestedMode;
     uint16_t delaySamples;
     uint16_t activeDelay = 0xFFFFU;
+    uint8_t activeMode = 0xFFU;
+    uint32_t activePhaseStep = 0xFFFFFFFFUL;
+    uint32_t activePhaseLag = 0xFFFFFFFFUL;
     uint8_t pcSequence;
     uint8_t fpgaSequence = 0U;
     uint32_t trackedFrequency = 0U;
@@ -84,6 +118,8 @@ int main(void)
     while (1) {
         if (PC_Link_TakePhaseRequest(&requestedPhase))
             targetPhase = requestedPhase;
+        if (PC_Link_TakeModeRequest(&requestedMode))
+            targetMode = requestedMode;
 
         fpgaSequence++;
         status = FPGA_Capture_Run(fpgaSequence, gSamples, &flags);
@@ -118,7 +154,26 @@ int main(void)
             }
             peaks[0].frequencyMilliHz = trackedFrequency;
         }
-        {
+        if (targetMode == MEASUREMENT_MODE_DDS) {
+            uint32_t phaseStep;
+            uint32_t phaseLag;
+            bool phaseInRange = calculateDDSWords(
+                peaks[0].frequencyMilliHz, targetPhase,
+                &phaseStep, &phaseLag);
+
+            if (!phaseInRange)
+                flags |= MEASUREMENT_FLAG_PHASE_RANGE;
+            if (activeMode != MEASUREMENT_MODE_DDS ||
+                activePhaseStep != phaseStep ||
+                activePhaseLag != phaseLag) {
+                FPGA_Capture_SetOutput(
+                    fpgaSequence, MEASUREMENT_MODE_DDS,
+                    phaseStep, phaseLag);
+                activeMode = MEASUREMENT_MODE_DDS;
+                activePhaseStep = phaseStep;
+                activePhaseLag = phaseLag;
+            }
+        } else {
             bool phaseInRange = calculateDelay(
                 peaks[0].frequencyMilliHz, targetPhase, &delaySamples);
 
@@ -131,7 +186,22 @@ int main(void)
                 FPGA_Capture_SetDelay(fpgaSequence, delaySamples);
                 activeDelay = delaySamples;
             }
+            if (activeMode != MEASUREMENT_MODE_PIPELINE) {
+                FPGA_Capture_SetOutput(
+                    fpgaSequence, MEASUREMENT_MODE_PIPELINE, 0U, 0U);
+                activeMode = MEASUREMENT_MODE_PIPELINE;
+                activePhaseStep = 0U;
+                activePhaseLag = 0U;
+            }
         }
+        // The capture metadata was sampled before the just-issued mode
+        // command.  Report the requested mode immediately; lock remains a
+        // real FPGA status bit and will assert after the next valid crossing.
+        if (targetMode == MEASUREMENT_MODE_DDS)
+            flags |= MEASUREMENT_FLAG_DDS_MODE;
+        else
+            flags &= (uint16_t) ~(MEASUREMENT_FLAG_DDS_MODE |
+                                  MEASUREMENT_FLAG_DDS_LOCKED);
         if (PC_Link_TakeCaptureRequest(&pcSequence))
             PC_Link_SendResult(
                 pcSequence, flags, peaks, gSamples,

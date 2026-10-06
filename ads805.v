@@ -11,7 +11,8 @@ module ads805 #(
     parameter integer ADC_ZERO_CODE   = 2104,
     parameter integer DAC_ZERO_CODE   = 8279,
     parameter integer DAC_GAIN_Q16    = 318171,
-    parameter integer DAC_INVERT      = 0
+    parameter integer DAC_INVERT      = 0,
+    parameter integer DDS_PIPELINE_ADVANCE_SAMPLES = 10
 ) (
     input  wire        clk_50m,
     input  wire [11:0] adc_data,
@@ -64,6 +65,39 @@ module ads805 #(
         .delayed_data(delayed_sample_data)
     );
 
+    // Mode 0 retains the original sample-delay pipeline.  Mode 1 regenerates
+    // a clean sine with a phase-anchored DDS.  The delay RAM continues to run
+    // in both modes, so returning to mode 0 does not require a refill pause.
+    reg output_mode_dds = 1'b0;
+    reg dds_config_valid = 1'b0;
+    reg [31:0] configured_phase_step = 32'd0;
+    reg [31:0] configured_phase_lag = 32'd0;
+    wire [11:0] dds_sample_data;
+    wire dds_sample_valid;
+    wire dds_locked;
+    wire dds_signal_present;
+    zero_crossing_dds #(
+        .ADC_ZERO_CODE(ADC_ZERO_CODE),
+        .SAMPLE_HZ(SAMPLE_HZ),
+        .PIPELINE_ADVANCE_SAMPLES(DDS_PIPELINE_ADVANCE_SAMPLES)
+    ) zero_crossing_dds_inst (
+        .clk(clk_50m), .rst(rst), .enable(output_mode_dds),
+        .config_valid(dds_config_valid),
+        .config_phase_step(configured_phase_step),
+        .config_phase_lag(configured_phase_lag),
+        .sample_valid(sample_strobe), .sample_data(sample_data),
+        .output_valid(dds_sample_valid), .output_sample(dds_sample_data),
+        .locked(dds_locked), .signal_present(dds_signal_present)
+    );
+
+    wire selected_sample_valid = output_mode_dds ?
+        (dds_locked ? dds_sample_valid : sample_strobe) :
+        delayed_sample_valid;
+    wire [11:0] selected_sample_data =
+        output_mode_dds ?
+        (dds_locked ? dds_sample_data : ADC_ZERO_CODE[11:0]) :
+        delayed_sample_data;
+
     wire [13:0] mapped_dac_code;
     wire mapped_valid;
     wire mapper_clipped;
@@ -74,7 +108,7 @@ module ads805 #(
         .INVERT_OUTPUT(DAC_INVERT)
     ) voltage_mapper_inst (
         .clk(clk_50m), .rst(rst),
-        .sample_valid(delayed_sample_valid), .sample_data(delayed_sample_data),
+        .sample_valid(selected_sample_valid), .sample_data(selected_sample_data),
         .mapped_valid(mapped_valid), .dac_code(mapped_dac_code),
         .clipped(mapper_clipped)
     );
@@ -101,7 +135,8 @@ module ads805 #(
         end
     endfunction
 
-    // Receive CAPTURE (0x01, empty) and SET_DELAY (0x03, u16LE) frames.
+    // Receive CAPTURE (0x01), SET_DELAY (0x03) and SET_OUTPUT (0x04).
+    // SET_OUTPUT payload: mode:u8, phase_step:u32LE, phase_lag:u32LE.
     wire [7:0] rx_byte;
     wire rx_valid;
     wire rx_framing_error;
@@ -115,13 +150,19 @@ module ads805 #(
     reg [7:0] request_seq = 8'd0;
     reg [15:0] rx_crc = 16'hffff;
     reg [7:0] rx_crc_low = 8'd0;
-    reg [7:0] delay_low = 8'd0;
+    reg [15:0] rx_payload_length = 16'd0;
+    reg [3:0] rx_payload_index = 4'd0;
+    reg [15:0] pending_delay = 16'd0;
+    reg pending_mode_dds = 1'b0;
+    reg [31:0] pending_phase_step = 32'd0;
+    reg [31:0] pending_phase_lag = 32'd0;
     reg capture_request = 1'b0;
     wire request_crc_ok = ({rx_byte, rx_crc_low} == rx_crc);
 
     always @(posedge clk_50m) begin
         capture_request <= 1'b0;
         delay_config_valid <= 1'b0;
+        dds_config_valid <= 1'b0;
         if (rst || rx_framing_error) begin
             rx_state <= 4'd0;
             rx_crc   <= 16'hffff;
@@ -131,7 +172,8 @@ module ads805 #(
                 1: rx_state <= (rx_byte == 8'h5a) ? 2 :
                               (rx_byte == 8'ha5) ? 1 : 0;
                 2: begin
-                    if (rx_byte == 8'h01 || rx_byte == 8'h03) begin
+                    if (rx_byte == 8'h01 || rx_byte == 8'h03 ||
+                        rx_byte == 8'h04) begin
                         request_type <= rx_byte;
                         rx_crc   <= crc16_next(16'hffff, rx_byte);
                         rx_state <= 3;
@@ -143,40 +185,72 @@ module ads805 #(
                     rx_state    <= 4;
                 end
                 4: begin
+                    rx_payload_length[7:0] <= rx_byte;
                     rx_crc   <= crc16_next(rx_crc, rx_byte);
-                    rx_state <= ((request_type == 8'h01 && rx_byte == 0) ||
-                                 (request_type == 8'h03 && rx_byte == 2)) ? 5 : 0;
+                    rx_state <= 5;
                 end
                 5: begin
                     rx_crc   <= crc16_next(rx_crc, rx_byte);
-                    if (rx_byte != 0)
+                    rx_payload_length[15:8] <= rx_byte;
+                    rx_payload_index <= 4'd0;
+                    if (rx_byte != 0 ||
+                        (request_type == 8'h01 &&
+                         rx_payload_length[7:0] != 0) ||
+                        (request_type == 8'h03 &&
+                         rx_payload_length[7:0] != 2) ||
+                        (request_type == 8'h04 &&
+                         rx_payload_length[7:0] != 9))
                         rx_state <= 0;
-                    else if (request_type == 8'h01)
-                        rx_state <= 8;
+                    else if (rx_payload_length[7:0] == 0)
+                        rx_state <= 7;
                     else
                         rx_state <= 6;
                 end
                 6: begin
-                    delay_low <= rx_byte;
                     rx_crc <= crc16_next(rx_crc, rx_byte);
-                    rx_state   <= 7;
+                    if (request_type == 8'h03) begin
+                        if (rx_payload_index == 0)
+                            pending_delay[7:0] <= rx_byte;
+                        else
+                            pending_delay[15:8] <= rx_byte;
+                    end else begin
+                        case (rx_payload_index)
+                            0: pending_mode_dds <= rx_byte[0];
+                            1: pending_phase_step[7:0] <= rx_byte;
+                            2: pending_phase_step[15:8] <= rx_byte;
+                            3: pending_phase_step[23:16] <= rx_byte;
+                            4: pending_phase_step[31:24] <= rx_byte;
+                            5: pending_phase_lag[7:0] <= rx_byte;
+                            6: pending_phase_lag[15:8] <= rx_byte;
+                            7: pending_phase_lag[23:16] <= rx_byte;
+                            8: pending_phase_lag[31:24] <= rx_byte;
+                            default: ;
+                        endcase
+                    end
+                    if (rx_payload_index + 1'b1 ==
+                        rx_payload_length[3:0])
+                        rx_state <= 7;
+                    else
+                        rx_payload_index <= rx_payload_index + 1'b1;
                 end
                 7: begin
-                    configured_delay <=
-                        {rx_byte[DELAY_ADDR_WIDTH-9:0], delay_low};
-                    rx_crc <= crc16_next(rx_crc, rx_byte);
+                    rx_crc_low <= rx_byte;
                     rx_state <= 8;
                 end
                 8: begin
-                    rx_crc_low <= rx_byte;
-                    rx_state <= 9;
-                end
-                9: begin
                     if (request_crc_ok) begin
                         if (request_type == 8'h01)
                             capture_request <= 1'b1;
-                        else
+                        else if (request_type == 8'h03) begin
+                            configured_delay <=
+                                pending_delay[DELAY_ADDR_WIDTH-1:0];
                             delay_config_valid <= 1'b1;
+                        end else begin
+                            output_mode_dds <= pending_mode_dds;
+                            configured_phase_step <= pending_phase_step;
+                            configured_phase_lag <= pending_phase_lag;
+                            dds_config_valid <= 1'b1;
+                        end
                     end
                     rx_state <= 0;
                 end
@@ -268,7 +342,9 @@ module ads805 #(
                 9: frame_byte = EFFECTIVE_RATE[31:24];
                 10: frame_byte = CAPTURE_SAMPLES[7:0];
                 11: frame_byte = CAPTURE_SAMPLES[15:8];
-                12: frame_byte = {6'd0, capture_dac_clip, capture_otr};
+                12: frame_byte = {2'd0, dds_signal_present, dds_locked,
+                                  output_mode_dds, 1'b0,
+                                  capture_dac_clip, capture_otr};
                 13: frame_byte = 8'd0;
                 default:
                     if (index < FRAME_LENGTH - 2)

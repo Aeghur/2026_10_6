@@ -7,6 +7,7 @@
 
 #define FPGA_TYPE_CAPTURE       (0x01U)
 #define FPGA_TYPE_SET_DELAY     (0x03U)
+#define FPGA_TYPE_SET_OUTPUT    (0x04U)
 #define FPGA_TYPE_SAMPLES       (0x81U)
 #define FPGA_PAYLOAD_SIZE       (8U + MEASUREMENT_FFT_SIZE * 2U)
 #define FPGA_BYTE_TIMEOUT_LOOPS (4000000UL)
@@ -71,6 +72,37 @@ void FPGA_Capture_SetDelay(uint8_t sequence, uint16_t delaySamples)
         crc = crc16Update(crc, frame[index]);
     frame[8] = (uint8_t) crc;
     frame[9] = (uint8_t) (crc >> 8);
+    for (index = 0U; index < sizeof(frame); index++)
+        DL_UART_Main_transmitDataBlocking(FPGA_UART_INST, frame[index]);
+}
+
+void FPGA_Capture_SetOutput(
+    uint8_t sequence, uint8_t mode, uint32_t phaseStep,
+    uint32_t phaseLag)
+{
+    uint8_t frame[17];
+    uint16_t crc = 0xFFFFU;
+    uint8_t index;
+
+    frame[0] = 0xA5U;
+    frame[1] = 0x5AU;
+    frame[2] = FPGA_TYPE_SET_OUTPUT;
+    frame[3] = sequence;
+    frame[4] = 9U;
+    frame[5] = 0U;
+    frame[6] = mode;
+    frame[7] = (uint8_t) phaseStep;
+    frame[8] = (uint8_t) (phaseStep >> 8);
+    frame[9] = (uint8_t) (phaseStep >> 16);
+    frame[10] = (uint8_t) (phaseStep >> 24);
+    frame[11] = (uint8_t) phaseLag;
+    frame[12] = (uint8_t) (phaseLag >> 8);
+    frame[13] = (uint8_t) (phaseLag >> 16);
+    frame[14] = (uint8_t) (phaseLag >> 24);
+    for (index = 2U; index < 15U; index++)
+        crc = crc16Update(crc, frame[index]);
+    frame[15] = (uint8_t) crc;
+    frame[16] = (uint8_t) (crc >> 8);
     for (index = 0U; index < sizeof(frame); index++)
         DL_UART_Main_transmitDataBlocking(FPGA_UART_INST, frame[index]);
 }

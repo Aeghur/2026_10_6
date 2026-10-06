@@ -19,6 +19,7 @@ from protocol import (
     TYPE_ERROR,
     TYPE_PC_CAPTURE,
     TYPE_PC_SET_PHASE,
+    TYPE_PC_SET_MODE,
     TYPE_PC_RESULT,
     decode_error,
     decode_result,
@@ -61,6 +62,13 @@ class ScopeApp:
             textvariable=self.phase_var, width=7
         ).pack(side=tk.LEFT)
         ttk.Label(bar, text="°").pack(side=tk.LEFT)
+        ttk.Label(bar, text="输出模式").pack(side=tk.LEFT, padx=(12, 3))
+        self.mode_var = tk.StringVar(value="流水线延迟")
+        self.mode_box = ttk.Combobox(
+            bar, textvariable=self.mode_var, width=12, state="readonly",
+            values=("流水线延迟", "过零锁相DDS")
+        )
+        self.mode_box.pack(side=tk.LEFT)
         ttk.Label(bar, text="频谱单位").pack(side=tk.LEFT, padx=(18, 3))
         self.db_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
@@ -132,7 +140,11 @@ class ScopeApp:
             self.status.set("目标相位必须位于0～359.99°")
             return
         phase_cdeg = int(round(phase * 100.0))
+        mode = 1 if self.mode_var.get() == "过零锁相DDS" else 0
         try:
+            self.serial.write(encode_frame(
+                TYPE_PC_SET_MODE, self.sequence, bytes((mode,))
+            ))
             self.serial.write(encode_frame(
                 TYPE_PC_SET_PHASE, self.sequence,
                 phase_cdeg.to_bytes(2, "little")
@@ -247,10 +259,15 @@ class ScopeApp:
         otr = "触发" if result.flags & 1 else "正常"
         dac_clip = "触发" if result.flags & 2 else "正常"
         phase_range = "超范围" if result.flags & 4 else "正常"
+        output_mode = "DDS" if result.flags & 8 else "流水线"
+        dds_lock = "已锁定" if result.flags & 16 else "未锁定"
+        dds_signal = "有信号" if result.flags & 32 else "无信号"
+        dds_state = f"{dds_lock}/{dds_signal}" if result.flags & 8 else "—"
         self.status.set(
             f"Fs={result.sample_rate:,} S/s，N={samples.size}，"
             f"Δf={resolution:.3f} Hz，CRC=正常，OTR={otr}，"
-            f"DAC削顶={dac_clip}，调相={phase_range}；频率：{peak_text}"
+            f"DAC削顶={dac_clip}，调相={phase_range}，模式={output_mode}，"
+            f"DDS={dds_state}；频率：{peak_text}"
         )
         self.figure.tight_layout(pad=2.2)
         self.canvas.draw_idle()
