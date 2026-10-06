@@ -29,11 +29,11 @@ payload为空。MSPM0持续在后台采集和跟踪频率，该命令不启动�
 ```text
 sample_rate:u32        = 390625
 sample_count:u16       = 4096
-spectrum_count:u16     = 1050
+spectrum_count:u16     = 1200
 flags:u16
 peak[3] { frequency_millihz:u32, magnitude:u16 }
 samples[4096]:u16[]
-spectrum[1050]:u16[]
+spectrum[1200]:u16[]
 ```
 
 单正弦模式只使用 `peak[0]`，其余两个峰为0，以保持PC结果帧结构兼容。
@@ -77,7 +77,7 @@ delay_samples:u16
 
 ## FFT设计
 
-- 输入：1～100 kHz单正弦；
+- 输入：0.9～110 kHz单正弦；
 - 原始采样率：25 MHz；
 - 抽取：64；
 - FFT采样率：390625 S/s；
@@ -96,7 +96,7 @@ delay_samples:u16
 3. 在10 kHz附近测量时间差 `τ0`。
 4. 计算 `round(τ0 × 25 MHz)`。
 5. 将结果写入 `MEASUREMENT_FIXED_LATENCY_SAMPLES`，重新构建MSPM0固件。
-6. 分别测试1、10、50、100 kHz和90°目标相位；如模拟群延迟随频率明显变化，后续应改为频率分段补偿表。
+6. 分别测试0.9、1、10、50、100、110 kHz和90°目标相位；如模拟群延迟随频率明显变化，后续应改为频率分段补偿表。
 
 ## 排错
 

@@ -15,15 +15,36 @@ static bool calculateDelay(
     uint32_t frequencyMilliHz, uint16_t phaseCentiDegrees,
     uint16_t *delaySamples)
 {
+    const uint32_t minimumMilliHz =
+        MEASUREMENT_MIN_SPECTRUM_HZ * 1000UL;
+    const uint32_t maximumMilliHz =
+        MEASUREMENT_MAX_SPECTRUM_HZ * 1000UL;
     uint64_t periodQ16;
     uint64_t targetQ16;
     uint64_t fixedQ16 =
         (uint64_t) MEASUREMENT_FIXED_LATENCY_SAMPLES << 16;
     uint64_t additional;
 
-    if (frequencyMilliHz < MEASUREMENT_MIN_SPECTRUM_HZ * 1000UL ||
-        frequencyMilliHz > MEASUREMENT_MAX_SPECTRUM_HZ * 1000UL)
-        return false;
+    // Always initialize the output.  Previously a slightly out-of-band FFT
+    // interpolation just beyond a configured band edge returned here
+    // with delaySamples undefined, and the caller sent that stack value to
+    // the FPGA as a random delay.
+    *delaySamples = 0U;
+
+    // Hann-window peak interpolation can cross a configured band edge by a
+    // fraction of a bin.  Accept up to two FFT bins and clamp to the promised
+    // 0.9 kHz..110 kHz input range; reject larger excursions deterministically.
+    if (frequencyMilliHz < minimumMilliHz) {
+        if (minimumMilliHz - frequencyMilliHz >
+            MEASUREMENT_EDGE_TOLERANCE_MILLIHZ)
+            return false;
+        frequencyMilliHz = minimumMilliHz;
+    } else if (frequencyMilliHz > maximumMilliHz) {
+        if (frequencyMilliHz - maximumMilliHz >
+            MEASUREMENT_EDGE_TOLERANCE_MILLIHZ)
+            return false;
+        frequencyMilliHz = maximumMilliHz;
+    }
     periodQ16 =
         (((uint64_t) MEASUREMENT_ADC_RATE_HZ * 1000ULL) << 16) /
         frequencyMilliHz;
@@ -36,7 +57,6 @@ static bool calculateDelay(
         // Do not leave a stale, large delay active when an exact whole-cycle
         // solution is outside RAM.  Zero additional delay is the closest
         // safe approximation for the in-phase case at low frequency.
-        *delaySamples = 0U;
         return false;
     }
     *delaySamples = (uint16_t) additional;

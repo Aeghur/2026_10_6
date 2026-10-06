@@ -227,7 +227,7 @@ class ScopeApp:
             ylabel = "幅值 (FFT code)"
         self.freq_axis.plot(freq_khz, y, lw=0.9)
         self.freq_axis.set(
-            xlabel="频率 (kHz)", ylabel=ylabel, title="0～100 kHz 单频频谱"
+            xlabel="频率 (kHz)", ylabel=ylabel, title="0～110 kHz 单频频谱"
         )
         self.freq_axis.grid(True, alpha=0.3)
 
