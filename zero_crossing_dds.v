@@ -25,6 +25,7 @@ module zero_crossing_dds #(
     input  wire        config_valid,
     input  wire [31:0] config_phase_step,
     input  wire [31:0] config_phase_lag,
+    input  wire        frequency_x2,
     input  wire        reference_edge,
     input  wire        sample_valid,
     input  wire [11:0] sample_data,
@@ -122,9 +123,11 @@ module zero_crossing_dds #(
     localparam [31:0] CALIBRATION_LAG_WORD =
         (64'd4294967296 * PHASE_CALIBRATION_LAG_CDEG + 64'd18000) /
         64'd36000;
+    wire [31:0] calibration_lag_word = frequency_x2 ?
+        {CALIBRATION_LAG_WORD[30:0], 1'b0} : CALIBRATION_LAG_WORD;
     wire [31:0] output_phase =
         carrier_phase + phase_advance - applied_phase_lag -
-        calibration_delay_product[31:0] - CALIBRATION_LAG_WORD;
+        calibration_delay_product[31:0] - calibration_lag_word;
 
     wire signed [15:0] sine_sample;
     reg [11:0] envelope_pipe = 12'd0;

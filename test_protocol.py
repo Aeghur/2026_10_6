@@ -48,10 +48,10 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(int.from_bytes(frame.payload, "little"), 9000)
 
     def test_mode_configuration_layout(self) -> None:
-        encoded = encode_frame(TYPE_PC_SET_MODE, 4, b"\x01")
+        encoded = encode_frame(TYPE_PC_SET_MODE, 4, b"\x03")
         frame = FrameDecoder().feed(encoded)[0]
         self.assertEqual(frame.frame_type, TYPE_PC_SET_MODE)
-        self.assertEqual(frame.payload, b"\x01")
+        self.assertEqual(frame.payload, b"\x03")
 
     def test_result_layout(self) -> None:
         samples = (2000, 2048, 2100, 2048)

@@ -26,6 +26,10 @@ module tb_zero_crossing_dds #(
     wire [11:0] output_sample_180;
     wire locked_180;
     wire signal_present_180;
+    wire output_valid_x2;
+    wire [11:0] output_sample_x2;
+    wire locked_x2;
+    wire signal_present_x2;
     integer sample_index = 0;
     integer valid_count = 0;
     integer minimum_output = 4095;
@@ -35,6 +39,8 @@ module tb_zero_crossing_dds #(
     integer maximum_step = 0;
     integer output_step = 0;
     integer crossing_samples = 0;
+    integer x2_positive_crossings = 0;
+    reg x2_was_above = 1'b0;
     real angle;
     real sample_real;
 
@@ -49,6 +55,7 @@ module tb_zero_crossing_dds #(
         .config_valid(config_valid),
         .config_phase_step(config_phase_step),
         .config_phase_lag(config_phase_lag),
+        .frequency_x2(1'b0),
         .reference_edge(reference_edge),
         .sample_valid(sample_valid), .sample_data(sample_data),
         .output_valid(output_valid), .output_sample(output_sample),
@@ -64,11 +71,28 @@ module tb_zero_crossing_dds #(
         .config_valid(config_valid),
         .config_phase_step(config_phase_step),
         .config_phase_lag(32'h80000000),
+        .frequency_x2(1'b0),
         .reference_edge(reference_edge),
         .sample_valid(sample_valid), .sample_data(sample_data),
         .output_valid(output_valid_180),
         .output_sample(output_sample_180),
         .locked(locked_180), .signal_present(signal_present_180)
+    );
+
+    zero_crossing_dds #(
+        .ADC_ZERO_CODE(2104),
+        .SAMPLE_HZ(SAMPLE_HZ),
+        .PIPELINE_ADVANCE_SAMPLES(10)
+    ) dut_x2 (
+        .clk(clk), .rst(rst), .enable(enable),
+        .config_valid(config_valid),
+        .config_phase_step(config_phase_step << 1),
+        .config_phase_lag(config_phase_lag),
+        .frequency_x2(1'b1),
+        .reference_edge(reference_edge),
+        .sample_valid(sample_valid), .sample_data(sample_data),
+        .output_valid(output_valid_x2), .output_sample(output_sample_x2),
+        .locked(locked_x2), .signal_present(signal_present_x2)
     );
 
     always @(posedge clk) begin
@@ -101,6 +125,11 @@ module tb_zero_crossing_dds #(
         end
         if (reference_edge)
             crossing_samples <= crossing_samples + 1;
+        if (output_valid_x2 && dut_x2.amplitude_ramp >= 400) begin
+            if (!x2_was_above && output_sample_x2 >= 2104)
+                x2_positive_crossings <= x2_positive_crossings + 1;
+            x2_was_above <= output_sample_x2 >= 2104;
+        end
     end
 
     initial begin
@@ -112,7 +141,7 @@ module tb_zero_crossing_dds #(
         config_valid = 0;
         repeat (TEST_SAMPLES * 2) @(posedge clk);
         if (!signal_present || !locked || !signal_present_180 ||
-            !locked_180) begin
+            !locked_180 || !signal_present_x2 || !locked_x2) begin
             $display("FAIL: DDS acquire signal=%0d lock=%0d envelope=%0d age=%0d samples=%0d step=%0d cross=%0d",
                      signal_present, locked, dut.envelope,
                      dut.samples_since_crossing,
@@ -123,6 +152,7 @@ module tb_zero_crossing_dds #(
         if (valid_count < TEST_SAMPLES / 2 || minimum_output > 1700 ||
             maximum_output < 2500 || inversion_errors != 0 ||
             maximum_step > 64 ||
+            x2_positive_crossings < 6 ||
             (STEP_ERROR_PPM != 0 && dut.frequency_trim == 0)) begin
             $display("FAIL: invalid DDS output count/range/step %0d %0d %0d %0d",
                      valid_count, minimum_output, maximum_output, maximum_step);

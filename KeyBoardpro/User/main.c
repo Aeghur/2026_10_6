@@ -154,7 +154,7 @@ int main(void)
             }
             peaks[0].frequencyMilliHz = trackedFrequency;
         }
-        if (targetMode == MEASUREMENT_MODE_DDS) {
+        if ((targetMode & MEASUREMENT_MODE_DDS_MASK) != 0U) {
             uint32_t phaseStep;
             uint32_t phaseLag;
             bool phaseInRange = calculateDDSWords(
@@ -163,13 +163,13 @@ int main(void)
 
             if (!phaseInRange)
                 flags |= MEASUREMENT_FLAG_PHASE_RANGE;
-            if (activeMode != MEASUREMENT_MODE_DDS ||
+            if (activeMode != targetMode ||
                 activePhaseStep != phaseStep ||
                 activePhaseLag != phaseLag) {
                 FPGA_Capture_SetOutput(
-                    fpgaSequence, MEASUREMENT_MODE_DDS,
+                    fpgaSequence, targetMode,
                     phaseStep, phaseLag);
-                activeMode = MEASUREMENT_MODE_DDS;
+                activeMode = targetMode;
                 activePhaseStep = phaseStep;
                 activePhaseLag = phaseLag;
             }
@@ -197,11 +197,15 @@ int main(void)
         // The capture metadata was sampled before the just-issued mode
         // command.  Report the requested mode immediately; lock remains a
         // real FPGA status bit and will assert after the next valid crossing.
-        if (targetMode == MEASUREMENT_MODE_DDS)
+        if ((targetMode & MEASUREMENT_MODE_DDS_MASK) != 0U)
             flags |= MEASUREMENT_FLAG_DDS_MODE;
         else
             flags &= (uint16_t) ~(MEASUREMENT_FLAG_DDS_MODE |
                                   MEASUREMENT_FLAG_DDS_LOCKED);
+        if ((targetMode & MEASUREMENT_MODE_X2_MASK) != 0U)
+            flags |= MEASUREMENT_FLAG_DDS_X2;
+        else
+            flags &= (uint16_t) ~MEASUREMENT_FLAG_DDS_X2;
         if (PC_Link_TakeCaptureRequest(&pcSequence))
             PC_Link_SendResult(
                 pcSequence, flags, peaks, gSamples,

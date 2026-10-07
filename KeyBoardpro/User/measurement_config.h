@@ -22,9 +22,13 @@
 #define MEASUREMENT_FLAG_DDS_MODE      (0x0008U)
 #define MEASUREMENT_FLAG_DDS_LOCKED    (0x0010U)
 #define MEASUREMENT_FLAG_DDS_SIGNAL    (0x0020U)
+#define MEASUREMENT_FLAG_DDS_X2        (0x0040U)
 
 #define MEASUREMENT_MODE_PIPELINE      (0U)
 #define MEASUREMENT_MODE_DDS           (1U)
+#define MEASUREMENT_MODE_DDS_X2        (3U)
+#define MEASUREMENT_MODE_DDS_MASK      (0x01U)
+#define MEASUREMENT_MODE_X2_MASK       (0x02U)
 
 typedef struct {
     uint32_t frequencyMilliHz;

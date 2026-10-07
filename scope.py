@@ -69,7 +69,11 @@ class ScopeApp:
             values=("流水线延迟", "比较器锁相DDS")
         )
         self.mode_box.pack(side=tk.LEFT)
-        ttk.Label(bar, text="频谱单位").pack(side=tk.LEFT, padx=(18, 3))
+        self.frequency_x2_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            bar, text="2倍频", variable=self.frequency_x2_var
+        ).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Label(bar, text="频谱单位").pack(side=tk.LEFT, padx=(12, 3))
         self.db_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             bar, text="相对 dB", variable=self.db_var, command=self.redraw
@@ -141,6 +145,8 @@ class ScopeApp:
             return
         phase_cdeg = int(round(phase * 100.0))
         mode = 1 if self.mode_var.get() == "比较器锁相DDS" else 0
+        if mode and self.frequency_x2_var.get():
+            mode |= 0x02
         try:
             self.serial.write(encode_frame(
                 TYPE_PC_SET_MODE, self.sequence, bytes((mode,))
@@ -259,7 +265,14 @@ class ScopeApp:
         otr = "触发" if result.flags & 1 else "正常"
         dac_clip = "触发" if result.flags & 2 else "正常"
         phase_range = "超范围" if result.flags & 4 else "正常"
-        output_mode = "DDS" if result.flags & 8 else "流水线"
+        output_mode = "DDS 2×" if result.flags & 64 else (
+            "DDS 1×" if result.flags & 8 else "流水线"
+        )
+        frequency_text = f"FFT输入：{peak_text}"
+        if result.flags & 64:
+            frequency_text += (
+                f"，DDS输出目标≈{result.peaks[0].frequency_hz * 2 / 1000:.3f} kHz"
+            )
         dds_lock = "已锁定" if result.flags & 16 else "未锁定"
         dds_signal = "有信号" if result.flags & 32 else "无信号"
         dds_state = f"{dds_lock}/{dds_signal}" if result.flags & 8 else "—"
@@ -267,7 +280,7 @@ class ScopeApp:
             f"Fs={result.sample_rate:,} S/s，N={samples.size}，"
             f"Δf={resolution:.3f} Hz，CRC=正常，OTR={otr}，"
             f"DAC削顶={dac_clip}，调相={phase_range}，模式={output_mode}，"
-            f"DDS={dds_state}；频率：{peak_text}"
+            f"DDS={dds_state}；{frequency_text}"
         )
         self.figure.tight_layout(pad=2.2)
         self.canvas.draw_idle()
