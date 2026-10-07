@@ -26,6 +26,7 @@ module zero_crossing_dds #(
     input  wire [31:0] config_phase_step,
     input  wire [31:0] config_phase_lag,
     input  wire        frequency_x2,
+    input  wire [1:0]  amplitude_scale_code,
     input  wire        reference_edge,
     input  wire        sample_valid,
     input  wire [11:0] sample_data,
@@ -138,6 +139,21 @@ module zero_crossing_dds #(
     reg scale_valid = 1'b0;
     wire signed [28:0] reconstructed_wide =
         ADC_ZERO_SIGNED + (scaled_sample >>> 15);
+
+    // Encoding keeps legacy mode value zero at full amplitude:
+    // 00=8/8, 01=2/8, 10=4/8, 11=6/8.
+    function [11:0] scale_envelope;
+        input [11:0] value;
+        input [1:0] scale_code;
+        begin
+            case (scale_code)
+                2'd1: scale_envelope = value >> 2;
+                2'd2: scale_envelope = value >> 1;
+                2'd3: scale_envelope = (value >> 1) + (value >> 2);
+                default: scale_envelope = value;
+            endcase
+        end
+    endfunction
 
     sine_rom_1024 #(.ROM_FILE(ROM_FILE)) sine_rom_inst (
         .clk(clk), .address(output_phase[31:22]), .value(sine_sample)
@@ -285,8 +301,9 @@ module zero_crossing_dds #(
 
             rom_valid <= sample_valid && enable && locked;
             if (sample_valid && enable && locked) begin
-                envelope_pipe <= (amplitude_ramp < envelope) ?
-                                 amplitude_ramp : envelope;
+                envelope_pipe <= scale_envelope(
+                    (amplitude_ramp < envelope) ? amplitude_ramp : envelope,
+                    amplitude_scale_code);
             end
 
             scale_valid <= rom_valid;

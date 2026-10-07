@@ -2,6 +2,7 @@
 
 #include "fft_analyzer.h"
 #include "fpga_capture.h"
+#include "keypad_control.h"
 #include "measurement_config.h"
 #include "msp_uart_link.h"
 #include "pc_link.h"
@@ -109,17 +110,27 @@ int main(void)
     uint8_t pcSequence;
     uint8_t fpgaSequence = 0U;
     uint32_t trackedFrequency = 0U;
+    bool pcControlChanged;
 
     SYSCFG_DL_init();
     MSP_UART_Link_Init();
     FFT_Analyzer_Init();
     PC_Link_Init();
+    Keypad_Control_Init(targetMode, targetPhase);
 
     while (1) {
-        if (PC_Link_TakePhaseRequest(&requestedPhase))
+        pcControlChanged = false;
+        if (PC_Link_TakePhaseRequest(&requestedPhase)) {
             targetPhase = requestedPhase;
-        if (PC_Link_TakeModeRequest(&requestedMode))
+            pcControlChanged = true;
+        }
+        if (PC_Link_TakeModeRequest(&requestedMode)) {
             targetMode = requestedMode;
+            pcControlChanged = true;
+        }
+        if (pcControlChanged)
+            Keypad_Control_RefreshDisplay(targetMode, targetPhase);
+        (void) Keypad_Control_Poll(&targetMode, &targetPhase);
 
         fpgaSequence++;
         status = FPGA_Capture_Run(fpgaSequence, gSamples, &flags);
@@ -206,6 +217,13 @@ int main(void)
             flags |= MEASUREMENT_FLAG_DDS_X2;
         else
             flags &= (uint16_t) ~MEASUREMENT_FLAG_DDS_X2;
+        flags &= (uint16_t) ~MEASUREMENT_FLAG_AMPLITUDE_MASK;
+        if ((targetMode & MEASUREMENT_MODE_DDS_MASK) != 0U) {
+            flags |= (uint16_t)
+                (((targetMode & MEASUREMENT_MODE_AMPLITUDE_MASK) >>
+                   MEASUREMENT_MODE_AMPLITUDE_SHIFT) <<
+                  MEASUREMENT_FLAG_AMPLITUDE_SHIFT);
+        }
         if (PC_Link_TakeCaptureRequest(&pcSequence))
             PC_Link_SendResult(
                 pcSequence, flags, peaks, gSamples,

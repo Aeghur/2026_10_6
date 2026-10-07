@@ -450,6 +450,16 @@
               <FilePath>..\User\measurement_config.h</FilePath>
             </File>
             <File>
+              <FileName>keypad_control.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\keypad_control.c</FilePath>
+            </File>
+            <File>
+              <FileName>keypad_control.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\User\keypad_control.h</FilePath>
+            </File>
+            <File>
               <FileName>msp_uart_link.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\msp_uart_link.c</FilePath>

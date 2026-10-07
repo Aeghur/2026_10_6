@@ -73,7 +73,15 @@ class ScopeApp:
         ttk.Checkbutton(
             bar, text="2倍频", variable=self.frequency_x2_var
         ).pack(side=tk.LEFT, padx=(8, 0))
-        ttk.Label(bar, text="频谱单位").pack(side=tk.LEFT, padx=(12, 3))
+        ttk.Label(bar, text="输出幅度").pack(side=tk.LEFT, padx=(8, 3))
+        self.amplitude_var = tk.StringVar(value="8")
+        self.amplitude_box = ttk.Combobox(
+            bar, textvariable=self.amplitude_var, width=3, state="readonly",
+            values=("2", "4", "6", "8")
+        )
+        self.amplitude_box.pack(side=tk.LEFT)
+        ttk.Label(bar, text="/8").pack(side=tk.LEFT)
+        ttk.Label(bar, text="频谱单位").pack(side=tk.LEFT, padx=(8, 3))
         self.db_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             bar, text="相对 dB", variable=self.db_var, command=self.redraw
@@ -147,6 +155,11 @@ class ScopeApp:
         mode = 1 if self.mode_var.get() == "比较器锁相DDS" else 0
         if mode and self.frequency_x2_var.get():
             mode |= 0x02
+        if mode:
+            amplitude_code = {"8": 0, "2": 1, "4": 2, "6": 3}.get(
+                self.amplitude_var.get(), 0
+            )
+            mode |= amplitude_code << 2
         try:
             self.serial.write(encode_frame(
                 TYPE_PC_SET_MODE, self.sequence, bytes((mode,))
@@ -268,6 +281,11 @@ class ScopeApp:
         output_mode = "DDS 2×" if result.flags & 64 else (
             "DDS 1×" if result.flags & 8 else "流水线"
         )
+        amplitude_code = (result.flags >> 8) & 0x03
+        amplitude_value = {0: 8, 1: 2, 2: 4, 3: 6}[amplitude_code]
+        amplitude_text = (
+            f"{amplitude_value}/8输入包络" if result.flags & 8 else "—"
+        )
         frequency_text = f"FFT输入：{peak_text}"
         if result.flags & 64:
             frequency_text += (
@@ -280,7 +298,7 @@ class ScopeApp:
             f"Fs={result.sample_rate:,} S/s，N={samples.size}，"
             f"Δf={resolution:.3f} Hz，CRC=正常，OTR={otr}，"
             f"DAC削顶={dac_clip}，调相={phase_range}，模式={output_mode}，"
-            f"DDS={dds_state}；{frequency_text}"
+            f"幅度={amplitude_text}，DDS={dds_state}；{frequency_text}"
         )
         self.figure.tight_layout(pad=2.2)
         self.canvas.draw_idle()

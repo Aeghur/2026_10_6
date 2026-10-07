@@ -100,6 +100,7 @@ module ads805 #(
     // in both modes, so returning to mode 0 does not require a refill pause.
     reg output_mode_dds = 1'b1;
     reg output_frequency_x2 = 1'b0;
+    reg [1:0] output_amplitude_code = 2'd0;
     reg dds_config_valid = 1'b0;
     reg [31:0] configured_phase_step = 32'd0;
     reg [31:0] configured_phase_lag = 32'd0;
@@ -122,6 +123,7 @@ module ads805 #(
         .config_phase_step(dds_phase_step),
         .config_phase_lag(configured_phase_lag),
         .frequency_x2(output_frequency_x2),
+        .amplitude_scale_code(output_amplitude_code),
         .reference_edge(comparator_rising_edge),
         .sample_valid(sample_strobe), .sample_data(sample_data),
         .output_valid(dds_sample_valid), .output_sample(dds_sample_data),
@@ -195,6 +197,7 @@ module ads805 #(
     reg [15:0] pending_delay = 16'd0;
     reg pending_mode_dds = 1'b0;
     reg pending_frequency_x2 = 1'b0;
+    reg [1:0] pending_amplitude_code = 2'd0;
     reg [31:0] pending_phase_step = 32'd0;
     reg [31:0] pending_phase_lag = 32'd0;
     reg capture_request = 1'b0;
@@ -259,6 +262,7 @@ module ads805 #(
                             0: begin
                                 pending_mode_dds <= rx_byte[0];
                                 pending_frequency_x2 <= rx_byte[1];
+                                pending_amplitude_code <= rx_byte[3:2];
                             end
                             1: pending_phase_step[7:0] <= rx_byte;
                             2: pending_phase_step[15:8] <= rx_byte;
@@ -292,6 +296,7 @@ module ads805 #(
                         end else begin
                             output_mode_dds <= pending_mode_dds;
                             output_frequency_x2 <= pending_frequency_x2;
+                            output_amplitude_code <= pending_amplitude_code;
                             configured_phase_step <= pending_phase_step;
                             configured_phase_lag <= pending_phase_lag;
                             dds_config_valid <= 1'b1;
@@ -391,7 +396,7 @@ module ads805 #(
                                   dds_signal_present, dds_locked,
                                   output_mode_dds, 1'b0,
                                   capture_dac_clip, capture_otr};
-                13: frame_byte = 8'd0;
+                13: frame_byte = {6'd0, output_amplitude_code};
                 default:
                     if (index < FRAME_LENGTH - 2)
                         frame_byte = index[0] ? {4'd0, sample_value[11:8]} :

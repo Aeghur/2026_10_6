@@ -40,6 +40,8 @@ module tb_zero_crossing_dds #(
     integer output_step = 0;
     integer crossing_samples = 0;
     integer x2_positive_crossings = 0;
+    integer x2_minimum_output = 4095;
+    integer x2_maximum_output = 0;
     reg x2_was_above = 1'b0;
     real angle;
     real sample_real;
@@ -56,6 +58,7 @@ module tb_zero_crossing_dds #(
         .config_phase_step(config_phase_step),
         .config_phase_lag(config_phase_lag),
         .frequency_x2(1'b0),
+        .amplitude_scale_code(2'd0),
         .reference_edge(reference_edge),
         .sample_valid(sample_valid), .sample_data(sample_data),
         .output_valid(output_valid), .output_sample(output_sample),
@@ -72,6 +75,7 @@ module tb_zero_crossing_dds #(
         .config_phase_step(config_phase_step),
         .config_phase_lag(32'h80000000),
         .frequency_x2(1'b0),
+        .amplitude_scale_code(2'd0),
         .reference_edge(reference_edge),
         .sample_valid(sample_valid), .sample_data(sample_data),
         .output_valid(output_valid_180),
@@ -89,6 +93,7 @@ module tb_zero_crossing_dds #(
         .config_phase_step(config_phase_step << 1),
         .config_phase_lag(config_phase_lag),
         .frequency_x2(1'b1),
+        .amplitude_scale_code(2'd1),
         .reference_edge(reference_edge),
         .sample_valid(sample_valid), .sample_data(sample_data),
         .output_valid(output_valid_x2), .output_sample(output_sample_x2),
@@ -129,10 +134,21 @@ module tb_zero_crossing_dds #(
             if (!x2_was_above && output_sample_x2 >= 2104)
                 x2_positive_crossings <= x2_positive_crossings + 1;
             x2_was_above <= output_sample_x2 >= 2104;
+            if (output_sample_x2 < x2_minimum_output)
+                x2_minimum_output <= output_sample_x2;
+            if (output_sample_x2 > x2_maximum_output)
+                x2_maximum_output <= output_sample_x2;
         end
     end
 
     initial begin
+        if (dut.scale_envelope(12'd800, 2'd0) != 12'd800 ||
+            dut.scale_envelope(12'd800, 2'd1) != 12'd200 ||
+            dut.scale_envelope(12'd800, 2'd2) != 12'd400 ||
+            dut.scale_envelope(12'd800, 2'd3) != 12'd600) begin
+            $display("FAIL: amplitude scale encoding");
+            $finish;
+        end
         #200;
         rst = 0;
         @(posedge clk);
@@ -153,9 +169,12 @@ module tb_zero_crossing_dds #(
             maximum_output < 2500 || inversion_errors != 0 ||
             maximum_step > 64 ||
             x2_positive_crossings < 6 ||
+            x2_minimum_output < 1900 || x2_minimum_output > 2050 ||
+            x2_maximum_output < 2150 || x2_maximum_output > 2300 ||
             (STEP_ERROR_PPM != 0 && dut.frequency_trim == 0)) begin
-            $display("FAIL: invalid DDS output count/range/step %0d %0d %0d %0d",
-                     valid_count, minimum_output, maximum_output, maximum_step);
+            $display("FAIL: invalid DDS output count/range/step %0d %0d %0d %0d x2=%0d..%0d",
+                     valid_count, minimum_output, maximum_output, maximum_step,
+                     x2_minimum_output, x2_maximum_output);
             $finish;
         end
         $display("PASS: continuous-phase DDS lock, max code step=%0d",

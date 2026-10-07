@@ -172,14 +172,14 @@ module tb_ads805;
             errors = errors + 1;
         end
 
-        // Switch to 2x zero-crossing DDS mode. Mode bit 0 enables DDS and
-        // bit 1 selects frequency doubling; frame length remains compatible.
+        // Switch to 2x zero-crossing DDS mode at 2/8 amplitude. Mode bit 0
+        // enables DDS, bit 1 selects 2x and bits 3:2 encode amplitude.
         calculated_crc = 16'hffff;
         calculated_crc = crc16_next(calculated_crc, 8'h04);
         calculated_crc = crc16_next(calculated_crc, 8'h39);
         calculated_crc = crc16_next(calculated_crc, 8'h09);
         calculated_crc = crc16_next(calculated_crc, 8'h00);
-        calculated_crc = crc16_next(calculated_crc, 8'h03);
+        calculated_crc = crc16_next(calculated_crc, 8'h07);
         calculated_crc = crc16_next(calculated_crc, 8'h44);
         calculated_crc = crc16_next(calculated_crc, 8'h33);
         calculated_crc = crc16_next(calculated_crc, 8'h22);
@@ -194,7 +194,7 @@ module tb_ads805;
         send_uart_byte(8'h39);
         send_uart_byte(8'h09);
         send_uart_byte(8'h00);
-        send_uart_byte(8'h03);
+        send_uart_byte(8'h07);
         send_uart_byte(8'h44);
         send_uart_byte(8'h33);
         send_uart_byte(8'h22);
@@ -208,6 +208,7 @@ module tb_ads805;
         #1000;
         if (dut.output_mode_dds !== 1'b1 ||
             dut.output_frequency_x2 !== 1'b1 ||
+            dut.output_amplitude_code !== 2'd1 ||
             dut.configured_phase_step !== 32'h11223344 ||
             dut.configured_phase_lag !== 32'h55667788) begin
             $display("FAIL: DDS output configuration was not applied");

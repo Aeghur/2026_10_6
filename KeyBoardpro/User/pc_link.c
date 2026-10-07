@@ -246,8 +246,8 @@ void UART1_IRQHandler(void)
                     } else if (gRxType == FRAME_TYPE_SET_MODE &&
                                gRxLength == 1U &&
                                (gOutputMode == MEASUREMENT_MODE_PIPELINE ||
-                                gOutputMode == MEASUREMENT_MODE_DDS ||
-                                gOutputMode == MEASUREMENT_MODE_DDS_X2)) {
+                                ((gOutputMode & MEASUREMENT_MODE_DDS_MASK) != 0U &&
+                                 (gOutputMode & 0xF0U) == 0U))) {
                         gModePending = true;
                     }
                 }
