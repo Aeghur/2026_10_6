@@ -26,13 +26,14 @@ module tb_dpll_high_band;
     always #10 clk = ~clk;
 
     dpll_dds_core #(.ROM_FILE("../rtl/sine_1024x16.hex")) dut (
-        .clk(clk), .rst(rst), .sample_valid(sample_valid),
+        .clk(clk), .rst(rst), .sample_valid(sample_valid), .loop_profile(2'd1),
         .adc_sample(adc_sample), .adc_otr(adc_otr),
         .phase_lag_word(32'd0), .calibration_phase_word(32'd0),
         .amplitude_code(14'd2143), .output_valid(output_valid),
         .dac_code(dac_code), .dac_clipped(), .locked(locked),
         .signal_present(signal_present), .phase_increment(phase_increment),
         .phase_error(phase_error), .signal_magnitude(signal_magnitude),
+        .i_filtered_debug(), .q_filtered_debug(), .integrator_debug(),
         .coarse_frequency_valid()
     );
 

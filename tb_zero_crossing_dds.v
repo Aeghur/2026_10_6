@@ -30,6 +30,10 @@ module tb_zero_crossing_dds #(
     wire [11:0] output_sample_x2;
     wire locked_x2;
     wire signal_present_x2;
+    wire output_valid_free;
+    wire [11:0] output_sample_free;
+    wire locked_free;
+    wire signal_present_free;
     integer sample_index = 0;
     integer valid_count = 0;
     integer minimum_output = 4095;
@@ -54,6 +58,7 @@ module tb_zero_crossing_dds #(
         .PIPELINE_ADVANCE_SAMPLES(10)
     ) dut (
         .clk(clk), .rst(rst), .enable(enable),
+        .free_run(1'b0),
         .config_valid(config_valid),
         .config_phase_step(config_phase_step),
         .config_phase_lag(config_phase_lag),
@@ -71,6 +76,7 @@ module tb_zero_crossing_dds #(
         .PIPELINE_ADVANCE_SAMPLES(10)
     ) dut_180 (
         .clk(clk), .rst(rst), .enable(enable),
+        .free_run(1'b0),
         .config_valid(config_valid),
         .config_phase_step(config_phase_step),
         .config_phase_lag(32'h80000000),
@@ -89,6 +95,7 @@ module tb_zero_crossing_dds #(
         .PIPELINE_ADVANCE_SAMPLES(10)
     ) dut_x2 (
         .clk(clk), .rst(rst), .enable(enable),
+        .free_run(1'b0),
         .config_valid(config_valid),
         .config_phase_step(config_phase_step << 1),
         .config_phase_lag(config_phase_lag),
@@ -98,6 +105,24 @@ module tb_zero_crossing_dds #(
         .sample_valid(sample_valid), .sample_data(sample_data),
         .output_valid(output_valid_x2), .output_sample(output_sample_x2),
         .locked(locked_x2), .signal_present(signal_present_x2)
+    );
+
+    zero_crossing_dds #(
+        .ADC_ZERO_CODE(2104),
+        .SAMPLE_HZ(SAMPLE_HZ),
+        .FREE_RUN_ENVELOPE_CODES(800),
+        .PIPELINE_ADVANCE_SAMPLES(10)
+    ) dut_free (
+        .clk(clk), .rst(rst), .enable(enable), .free_run(1'b1),
+        .config_valid(config_valid),
+        .config_phase_step(config_phase_step),
+        .config_phase_lag(32'h40000000),
+        .frequency_x2(1'b0), .amplitude_scale_code(2'd1),
+        .reference_edge(1'b0),
+        .sample_valid(sample_valid), .sample_data(12'd2104),
+        .output_valid(output_valid_free),
+        .output_sample(output_sample_free),
+        .locked(locked_free), .signal_present(signal_present_free)
     );
 
     always @(posedge clk) begin
@@ -157,7 +182,9 @@ module tb_zero_crossing_dds #(
         config_valid = 0;
         repeat (TEST_SAMPLES * 2) @(posedge clk);
         if (!signal_present || !locked || !signal_present_180 ||
-            !locked_180 || !signal_present_x2 || !locked_x2) begin
+            !locked_180 || !signal_present_x2 || !locked_x2 ||
+            !signal_present_free || !locked_free ||
+            dut_free.amplitude_ramp != 12'd800) begin
             $display("FAIL: DDS acquire signal=%0d lock=%0d envelope=%0d age=%0d samples=%0d step=%0d cross=%0d",
                      signal_present, locked, dut.envelope,
                      dut.samples_since_crossing,

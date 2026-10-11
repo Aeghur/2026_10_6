@@ -1,7 +1,9 @@
 // MSPM0 control/status bridge using the existing A5 5A + CRC16-CCITT frame.
 // RX 0x10 payload (11 bytes): lag_word u32, calibration_word u32,
 // amplitude u16, control u8 (bit0 output enable).
-// RX 0x01 empty payload requests a 0x90 status frame.
+// RX 0x01 empty payload requests the compatible 0x90 status frame.
+// RX 0x02 empty payload requests the extended 0x91 diagnostic frame.
+// RX 0x11 payload (1 byte) selects loop profile: 0 legacy, 1 balanced, 2 fast.
 module dpll_uart_bridge #(
     parameter integer CLK_HZ = 50_000_000,
     parameter integer BAUD = 2_000_000
@@ -11,12 +13,17 @@ module dpll_uart_bridge #(
     input  wire               uart_rx,
     output wire               uart_tx,
     output reg [31:0]         phase_lag_word = 32'd0,
+    output reg [1:0]          loop_profile = 2'd1,
     output reg [31:0]         calibration_phase_word = 32'd0,
     output reg [13:0]         amplitude_code = 14'd2143,
     output reg                output_enable = 1'b1,
     output reg                config_valid = 1'b0,
     input  wire [31:0]        phase_increment,
     input  wire signed [23:0] phase_error,
+    input  wire signed [23:0] signal_magnitude,
+    input  wire signed [23:0] i_filtered,
+    input  wire signed [23:0] q_filtered,
+    input  wire signed [31:0] integrator_debug,
     input  wire               locked,
     input  wire               signal_present,
     input  wire               dac_clipped,
@@ -56,11 +63,14 @@ module dpll_uart_bridge #(
     reg [31:0] pending_calibration = 32'd0;
     reg [15:0] pending_amplitude = 16'd2143;
     reg [7:0] pending_control = 8'd1;
+    reg [7:0] pending_loop_profile = 8'd1;
     reg status_request = 1'b0;
+    reg diagnostic_request = 1'b0;
 
     always @(posedge clk) begin
         config_valid <= 1'b0;
         status_request <= 1'b0;
+        diagnostic_request <= 1'b0;
         if (rst || rx_error) begin
             rx_state <= 4'd0;
             rx_crc <= 16'hffff;
@@ -88,31 +98,38 @@ module dpll_uart_bridge #(
                     rx_length[15:8] <= rx_byte;
                     rx_crc <= crc16_next(rx_crc, rx_byte);
                     payload_index <= 4'd0;
-                    if ((rx_type == 8'h01 && {rx_byte,rx_length[7:0]} == 0) ||
-                        (rx_type == 8'h10 && {rx_byte,rx_length[7:0]} == 11))
+                    if (((rx_type == 8'h01 || rx_type == 8'h02) &&
+                         {rx_byte,rx_length[7:0]} == 0) ||
+                        (rx_type == 8'h10 && {rx_byte,rx_length[7:0]} == 11) ||
+                        (rx_type == 8'h11 && {rx_byte,rx_length[7:0]} == 1))
                         rx_state <= ({rx_byte,rx_length[7:0]} == 0) ? 7 : 6;
                     else
                         rx_state <= 0;
                 end
                 6: begin
                     rx_crc <= crc16_next(rx_crc, rx_byte);
-                    case (payload_index)
-                        0: pending_lag[7:0] <= rx_byte;
-                        1: pending_lag[15:8] <= rx_byte;
-                        2: pending_lag[23:16] <= rx_byte;
-                        3: pending_lag[31:24] <= rx_byte;
-                        4: pending_calibration[7:0] <= rx_byte;
-                        5: pending_calibration[15:8] <= rx_byte;
-                        6: pending_calibration[23:16] <= rx_byte;
-                        7: pending_calibration[31:24] <= rx_byte;
-                        8: pending_amplitude[7:0] <= rx_byte;
-                        9: pending_amplitude[15:8] <= rx_byte;
-                        10: pending_control <= rx_byte;
-                    endcase
-                    if (payload_index == 10)
+                    if (rx_type == 8'h11) begin
+                        pending_loop_profile <= rx_byte;
                         rx_state <= 7;
-                    else
-                        payload_index <= payload_index + 1'b1;
+                    end else begin
+                        case (payload_index)
+                            0: pending_lag[7:0] <= rx_byte;
+                            1: pending_lag[15:8] <= rx_byte;
+                            2: pending_lag[23:16] <= rx_byte;
+                            3: pending_lag[31:24] <= rx_byte;
+                            4: pending_calibration[7:0] <= rx_byte;
+                            5: pending_calibration[15:8] <= rx_byte;
+                            6: pending_calibration[23:16] <= rx_byte;
+                            7: pending_calibration[31:24] <= rx_byte;
+                            8: pending_amplitude[7:0] <= rx_byte;
+                            9: pending_amplitude[15:8] <= rx_byte;
+                            10: pending_control <= rx_byte;
+                        endcase
+                        if (payload_index == 10)
+                            rx_state <= 7;
+                        else
+                            payload_index <= payload_index + 1'b1;
+                    end
                 end
                 7: begin
                     rx_crc_low <= rx_byte;
@@ -129,6 +146,11 @@ module dpll_uart_bridge #(
                             config_valid <= 1'b1;
                         end else if (rx_type == 8'h01) begin
                             status_request <= 1'b1;
+                        end else if (rx_type == 8'h02) begin
+                            diagnostic_request <= 1'b1;
+                        end else if (rx_type == 8'h11) begin
+                            loop_profile <= pending_loop_profile > 8'd2 ?
+                                2'd1 : pending_loop_profile[1:0];
                         end
                     end
                     rx_state <= 0;
@@ -142,7 +164,12 @@ module dpll_uart_bridge #(
     reg signed [31:0] status_error = 32'sd0;
     reg [15:0] status_flags = 16'd0;
     reg [13:0] status_dac_code = 14'd0;
+    reg signed [15:0] diagnostic_i = 16'sd0;
+    reg signed [15:0] diagnostic_q = 16'sd0;
+    reg signed [15:0] diagnostic_magnitude = 16'sd0;
+    reg signed [15:0] diagnostic_integrator = 16'sd0;
     reg [7:0] status_sequence = 8'd0;
+    reg tx_diagnostic = 1'b0;
     reg tx_active = 1'b0;
     reg [4:0] tx_index = 5'd0;
     reg [15:0] tx_crc = 16'hffff;
@@ -153,33 +180,65 @@ module dpll_uart_bridge #(
 
     function [7:0] status_byte;
         input [4:0] index;
+        input diagnostic;
+        input [7:0] sequence_value;
+        input [31:0] increment_value;
+        input signed [31:0] error_value;
+        input [15:0] flags_value;
+        input [13:0] dac_value;
+        input signed [15:0] diagnostic_i_value;
+        input signed [15:0] diagnostic_q_value;
+        input signed [15:0] diagnostic_magnitude_value;
+        input signed [15:0] diagnostic_integrator_value;
+        input [15:0] crc_value;
         begin
-            case (index)
-                0: status_byte = 8'ha5;
-                1: status_byte = 8'h5a;
-                2: status_byte = 8'h90;
-                3: status_byte = status_sequence;
-                4: status_byte = 8'd16;
-                5: status_byte = 8'd0;
-                6: status_byte = status_increment[7:0];
-                7: status_byte = status_increment[15:8];
-                8: status_byte = status_increment[23:16];
-                9: status_byte = status_increment[31:24];
-                10: status_byte = status_error[7:0];
-                11: status_byte = status_error[15:8];
-                12: status_byte = status_error[23:16];
-                13: status_byte = status_error[31:24];
-                14: status_byte = status_flags[7:0];
-                15: status_byte = status_flags[15:8];
-                16: status_byte = status_dac_code[7:0];
-                17: status_byte = {2'b00,status_dac_code[13:8]};
-                18: status_byte = 8'h40; // 25,000,000 little endian
-                19: status_byte = 8'h78;
-                20: status_byte = 8'h7d;
-                21: status_byte = 8'h01;
-                22: status_byte = tx_crc[7:0];
-                default: status_byte = tx_crc[15:8];
-            endcase
+            if (index == 0)
+                status_byte = 8'ha5;
+            else if (index == 1)
+                status_byte = 8'h5a;
+            else if (index == 2)
+                status_byte = diagnostic ? 8'h91 : 8'h90;
+            else if (index == 3)
+                status_byte = sequence_value;
+            else if (index == 4)
+                status_byte = diagnostic ? 8'd8 : 8'd16;
+            else if (index == 5)
+                status_byte = 8'd0;
+            else if (diagnostic) begin
+                case (index)
+                    6: status_byte = diagnostic_i_value[7:0];
+                    7: status_byte = diagnostic_i_value[15:8];
+                    8: status_byte = diagnostic_q_value[7:0];
+                    9: status_byte = diagnostic_q_value[15:8];
+                    10: status_byte = diagnostic_magnitude_value[7:0];
+                    11: status_byte = diagnostic_magnitude_value[15:8];
+                    12: status_byte = diagnostic_integrator_value[7:0];
+                    13: status_byte = diagnostic_integrator_value[15:8];
+                    14: status_byte = crc_value[7:0];
+                    default: status_byte = crc_value[15:8];
+                endcase
+            end else begin
+                case (index)
+                    6: status_byte = increment_value[7:0];
+                    7: status_byte = increment_value[15:8];
+                    8: status_byte = increment_value[23:16];
+                    9: status_byte = increment_value[31:24];
+                    10: status_byte = error_value[7:0];
+                    11: status_byte = error_value[15:8];
+                    12: status_byte = error_value[23:16];
+                    13: status_byte = error_value[31:24];
+                    14: status_byte = flags_value[7:0];
+                    15: status_byte = flags_value[15:8];
+                    16: status_byte = dac_value[7:0];
+                    17: status_byte = {2'b00,dac_value[13:8]};
+                    18: status_byte = 8'h40; // 25,000,000 little endian
+                    19: status_byte = 8'h78;
+                    20: status_byte = 8'h7d;
+                    21: status_byte = 8'h01;
+                    22: status_byte = crc_value[7:0];
+                    default: status_byte = crc_value[15:8];
+                endcase
+            end
         end
     endfunction
 
@@ -195,26 +254,40 @@ module dpll_uart_bridge #(
             tx_index <= 5'd0;
             tx_crc <= 16'hffff;
         end else begin
-            if (status_request && !tx_active) begin
+            if ((status_request || diagnostic_request) && !tx_active) begin
                 status_increment <= phase_increment;
                 status_error <= {{8{phase_error[23]}},phase_error};
-                status_flags <= {12'd0,adc_otr,dac_clipped,signal_present,locked};
+                status_flags <= {10'd0,loop_profile,adc_otr,dac_clipped,
+                                 signal_present,locked};
                 status_dac_code <= dac_code;
+                // Select the post-scale bits explicitly.  This is the same
+                // two's-complement arithmetic scaling as >>>, while making
+                // the intentional 16-bit telemetry width clear to Quartus.
+                diagnostic_i <= i_filtered[23:8];
+                diagnostic_q <= q_filtered[23:8];
+                diagnostic_magnitude <= signal_magnitude[23:8];
+                diagnostic_integrator <= integrator_debug[20:5];
                 status_sequence <= rx_sequence;
+                tx_diagnostic <= diagnostic_request;
                 tx_active <= 1'b1;
                 tx_index <= 5'd0;
                 tx_crc <= 16'hffff;
             end
 
             if (tx_active && !tx_busy && !tx_start && !tx_done) begin
-                tx_data <= status_byte(tx_index);
+                tx_data <= status_byte(
+                    tx_index, tx_diagnostic, status_sequence,
+                    status_increment, status_error, status_flags,
+                    status_dac_code, diagnostic_i, diagnostic_q,
+                    diagnostic_magnitude, diagnostic_integrator, tx_crc);
                 tx_start <= 1'b1;
             end
 
             if (tx_active && tx_done) begin
-                if (tx_index >= 2 && tx_index <= 21)
+                if (tx_index >= 2 &&
+                    tx_index <= (tx_diagnostic ? 5'd13 : 5'd21))
                     tx_crc <= crc16_next(tx_crc, tx_data);
-                if (tx_index == 23) begin
+                if (tx_index == (tx_diagnostic ? 5'd15 : 5'd23)) begin
                     tx_active <= 1'b0;
                     tx_index <= 5'd0;
                 end else begin

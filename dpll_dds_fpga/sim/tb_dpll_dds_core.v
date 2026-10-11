@@ -5,6 +5,7 @@ module tb_dpll_dds_core;
     reg sample_valid = 1'b0;
     reg [11:0] adc_sample = 12'd2104;
     reg adc_otr = 1'b0;
+    reg [1:0] loop_profile = 2'd0;
     reg [31:0] phase_lag_word = 32'd0;
     reg [31:0] calibration_phase_word = 32'd0;
     reg [13:0] amplitude_code = 14'd2048;
@@ -23,6 +24,7 @@ module tb_dpll_dds_core;
     integer sample_value;
     integer errors = 0;
     reg [31:0] phase_before_command;
+    reg [31:0] expected_pipeline_advance;
     real radians;
 
     always #10 clk = ~clk;
@@ -31,7 +33,7 @@ module tb_dpll_dds_core;
         .LPF_SHIFT(10), .LOOP_DECIMATION_LOG2(6),
         .ROM_FILE("../rtl/sine_1024x16.hex")
     ) dut (
-        .clk(clk), .rst(rst), .sample_valid(sample_valid),
+        .clk(clk), .rst(rst), .sample_valid(sample_valid), .loop_profile(loop_profile),
         .adc_sample(adc_sample), .adc_otr(adc_otr),
         .phase_lag_word(phase_lag_word),
         .calibration_phase_word(calibration_phase_word),
@@ -40,6 +42,7 @@ module tb_dpll_dds_core;
         .locked(locked), .signal_present(signal_present),
         .phase_increment(phase_increment), .phase_error(phase_error),
         .signal_magnitude(signal_magnitude),
+        .i_filtered_debug(), .q_filtered_debug(), .integrator_debug(),
         .coarse_frequency_valid(coarse_frequency_valid)
     );
 
@@ -86,7 +89,16 @@ module tb_dpll_dds_core;
 
         run_samples(50000); // accelerated-loop simulation parameters
         check_frequency(1717987);
+        expected_pipeline_advance = phase_increment * 9;
+        if (dut.pipeline_advance_word !== expected_pipeline_advance) begin
+            $display("FAIL: pipeline advance=%0d expected=%0d",
+                dut.pipeline_advance_word, expected_pipeline_advance);
+            errors = errors + 1;
+        end else begin
+            $display("PASS: AD9226 seven-sample plus DDS two-sample advance");
+        end
 
+        loop_profile = 2'd2; // fast profile for the frequency step
         input_period = 1250; // step to 20 kHz
         sample_index = 0;
         run_samples(50000);

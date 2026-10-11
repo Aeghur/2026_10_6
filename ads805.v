@@ -102,6 +102,7 @@ module ads805 #(
     // in both modes, so returning to mode 0 does not require a refill pause.
     reg output_mode_dds = 1'b1;
     reg output_frequency_x2 = 1'b0;
+    reg output_free_run = 1'b0;
     reg [1:0] output_amplitude_code = 2'd0;
     reg dds_config_valid = 1'b0;
     reg [31:0] configured_phase_step = 32'd0;
@@ -110,8 +111,9 @@ module ads805 #(
     wire dds_sample_valid;
     wire dds_locked;
     wire dds_signal_present;
-    wire [31:0] dds_phase_step = output_frequency_x2 ?
-        {measured_phase_step[30:0], 1'b0} : measured_phase_step;
+    wire [31:0] dds_phase_step = output_free_run ? configured_phase_step :
+        (output_frequency_x2 ?
+         {measured_phase_step[30:0], 1'b0} : measured_phase_step);
     zero_crossing_dds #(
         .ADC_ZERO_CODE(ADC_ZERO_CODE),
         .SAMPLE_HZ(SAMPLE_HZ),
@@ -121,7 +123,9 @@ module ads805 #(
             DDS_PHASE_CALIBRATION_DELAY_SAMPLES)
     ) zero_crossing_dds_inst (
         .clk(clk_50m), .rst(rst), .enable(output_mode_dds),
-        .config_valid(dds_config_valid || measured_frequency_valid),
+        .free_run(output_free_run),
+        .config_valid(dds_config_valid ||
+                      (!output_free_run && measured_frequency_valid)),
         .config_phase_step(dds_phase_step),
         .config_phase_lag(configured_phase_lag),
         .frequency_x2(output_frequency_x2),
@@ -179,8 +183,8 @@ module ads805 #(
 
     // Receive CAPTURE (0x01), SET_DELAY (0x03) and SET_OUTPUT (0x04).
     // SET_OUTPUT payload remains mode:u8, phase_step:u32LE, phase_lag:u32LE.
-    // Its phase_step field is accepted for protocol compatibility but is not
-    // used: T14 is the sole frequency source in DDS mode.
+    // Mode bit 4 selects free-running DDS.  In that mode phase_step is the
+    // commanded output frequency and neither T14 nor the ADC input is needed.
     wire [7:0] rx_byte;
     wire rx_valid;
     wire rx_framing_error;
@@ -199,14 +203,17 @@ module ads805 #(
     reg [15:0] pending_delay = 16'd0;
     reg pending_mode_dds = 1'b0;
     reg pending_frequency_x2 = 1'b0;
+    reg pending_free_run = 1'b0;
     reg [1:0] pending_amplitude_code = 2'd0;
     reg [31:0] pending_phase_step = 32'd0;
     reg [31:0] pending_phase_lag = 32'd0;
     reg capture_request = 1'b0;
+    reg output_ack_request = 1'b0;
     wire request_crc_ok = ({rx_byte, rx_crc_low} == rx_crc);
 
     always @(posedge clk_50m) begin
         capture_request <= 1'b0;
+        output_ack_request <= 1'b0;
         delay_config_valid <= 1'b0;
         dds_config_valid <= 1'b0;
         if (rst || rx_framing_error) begin
@@ -265,6 +272,7 @@ module ads805 #(
                                 pending_mode_dds <= rx_byte[0];
                                 pending_frequency_x2 <= rx_byte[1];
                                 pending_amplitude_code <= rx_byte[3:2];
+                                pending_free_run <= rx_byte[4];
                             end
                             1: pending_phase_step[7:0] <= rx_byte;
                             2: pending_phase_step[15:8] <= rx_byte;
@@ -299,9 +307,11 @@ module ads805 #(
                             output_mode_dds <= pending_mode_dds;
                             output_frequency_x2 <= pending_frequency_x2;
                             output_amplitude_code <= pending_amplitude_code;
+                            output_free_run <= pending_free_run;
                             configured_phase_step <= pending_phase_step;
                             configured_phase_lag <= pending_phase_lag;
                             dds_config_valid <= 1'b1;
+                            output_ack_request <= 1'b1;
                         end
                     end
                     rx_state <= 0;
@@ -369,19 +379,36 @@ module ads805 #(
         read_data <= sample_memory[read_addr];
 
     reg tx_active = 1'b0;
+    reg tx_ack_frame = 1'b0;
+    reg output_ack_pending = 1'b0;
+    reg [7:0] output_ack_seq = 8'd0;
+    reg [7:0] tx_sequence = 8'd0;
     reg [15:0] tx_index = 16'd0;
     reg [15:0] tx_crc = 16'hffff;
     reg [7:0] tx_data = 8'd0;
     reg tx_start = 1'b0;
     wire tx_busy;
     wire tx_done;
+    wire [15:0] tx_frame_length = tx_ack_frame ? 16'd8 : FRAME_LENGTH;
 
     function [7:0] frame_byte;
         input [15:0] index;
         input [7:0] sequence_value;
         input [11:0] sample_value;
+        input ack_frame;
         begin
-            case (index)
+            if (ack_frame) begin
+                case (index)
+                    0: frame_byte = 8'ha5;
+                    1: frame_byte = 8'h5a;
+                    2: frame_byte = 8'h84;
+                    3: frame_byte = sequence_value;
+                    4: frame_byte = 8'h00;
+                    5: frame_byte = 8'h00;
+                    6: frame_byte = tx_crc[7:0];
+                    default: frame_byte = tx_crc[15:8];
+                endcase
+            end else case (index)
                 0: frame_byte = 8'ha5;
                 1: frame_byte = 8'h5a;
                 2: frame_byte = 8'h81;
@@ -394,7 +421,7 @@ module ads805 #(
                 9: frame_byte = EFFECTIVE_RATE[31:24];
                 10: frame_byte = CAPTURE_SAMPLES[7:0];
                 11: frame_byte = CAPTURE_SAMPLES[15:8];
-                12: frame_byte = {1'b0, output_frequency_x2,
+                12: frame_byte = {output_free_run, output_frequency_x2,
                                   dds_signal_present, dds_locked,
                                   output_mode_dds, 1'b0,
                                   capture_dac_clip, capture_otr};
@@ -415,27 +442,47 @@ module ads805 #(
         tx_start <= 1'b0;
         if (rst) begin
             tx_active <= 1'b0;
+            tx_ack_frame <= 1'b0;
+            output_ack_pending <= 1'b0;
+            output_ack_seq <= 8'd0;
+            tx_sequence <= 8'd0;
             tx_index  <= 16'd0;
             tx_crc    <= 16'hffff;
             read_addr <= {ADDR_WIDTH{1'b0}};
+        end else if (output_ack_request && tx_active) begin
+            output_ack_pending <= 1'b1;
+            output_ack_seq <= request_seq;
+        end else if ((output_ack_request || output_ack_pending) &&
+                     !tx_active) begin
+            tx_active <= 1'b1;
+            tx_ack_frame <= 1'b1;
+            tx_sequence <= output_ack_request ? request_seq : output_ack_seq;
+            output_ack_pending <= 1'b0;
+            tx_index  <= 16'd0;
+            tx_crc    <= 16'hffff;
         end else if (capture_complete && !tx_active) begin
             tx_active <= 1'b1;
+            tx_ack_frame <= 1'b0;
+            tx_sequence <= capture_seq;
             tx_index  <= 16'd0;
             tx_crc    <= 16'hffff;
             read_addr <= {ADDR_WIDTH{1'b0}};
         end else if (tx_active && tx_done) begin
-            if (tx_index == FRAME_LENGTH - 1)
+            if (tx_index == tx_frame_length - 1)
                 tx_active <= 1'b0;
             else
                 tx_index <= tx_index + 1'b1;
         end else if (tx_active && !tx_busy && !tx_start) begin
-            tx_data  <= frame_byte(tx_index, capture_seq, read_data);
+            tx_data  <= frame_byte(
+                tx_index, tx_sequence, read_data, tx_ack_frame);
             tx_start <= 1'b1;
-            if (tx_index >= 2 && tx_index < FRAME_LENGTH - 2)
+            if (tx_index >= 2 && tx_index < tx_frame_length - 2)
                 tx_crc <= crc16_next(
-                    tx_crc, frame_byte(tx_index, capture_seq, read_data));
+                    tx_crc, frame_byte(
+                        tx_index, tx_sequence, read_data, tx_ack_frame));
             // Sample bytes begin at index 14. Advance after each high byte.
-            if (tx_index >= 15 && tx_index < FRAME_LENGTH - 2 &&
+            if (!tx_ack_frame && tx_index >= 15 &&
+                tx_index < FRAME_LENGTH - 2 &&
                 tx_index[0] && read_addr != CAPTURE_SAMPLES - 1)
                 read_addr <= read_addr + 1'b1;
         end

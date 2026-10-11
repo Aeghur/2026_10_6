@@ -13,6 +13,7 @@ module dpll_controller #(
 ) (
     input  wire               clk,
     input  wire               rst,
+    input  wire [1:0]         loop_profile,
     input  wire               phase_valid,
     input  wire signed [23:0] phase_error,
     input  wire signed [23:0] signal_magnitude,
@@ -21,7 +22,8 @@ module dpll_controller #(
     output reg  [31:0]        phase_increment = DEFAULT_PHASE_INCREMENT,
     output reg                locked = 1'b0,
     output reg                signal_present = 1'b0,
-    output reg                reacquired = 1'b0
+    output reg                reacquired = 1'b0,
+    output wire signed [31:0] integrator_debug
 );
     reg [31:0] base_increment = DEFAULT_PHASE_INCREMENT;
     reg signed [39:0] integrator = 40'sd0;
@@ -58,6 +60,12 @@ module dpll_controller #(
          $signed({phase_error[23], phase_error});
     localparam [24:0] LOCK_PHASE_LIMIT = 25'd699051;    // 15 degrees
     localparam [24:0] UNLOCK_PHASE_LIMIT = 25'd2796203; // 60 degrees
+    // Fast mode runs the unchanged PI arithmetic four times as often.  This
+    // avoids runtime gain shifters on the resource-constrained EP4CE6.
+    wire loop_update_tick = loop_profile == 2'd2 ?
+        &loop_count[LOOP_DECIMATION_LOG2-3:0] : &loop_count;
+
+    assign integrator_debug = integrator[31:0];
 
     always @(posedge clk) begin
         reacquired <= 1'b0;
@@ -82,7 +90,7 @@ module dpll_controller #(
             reacquired <= 1'b1;
         end else if (phase_valid) begin
             loop_count <= loop_count + 1'b1;
-            if (loop_count == {LOOP_DECIMATION_LOG2{1'b1}}) begin
+            if (loop_update_tick) begin
                 signal_present <= signal_magnitude >= MIN_MAGNITUDE;
                 if (signal_magnitude >= MIN_MAGNITUDE) begin
                     integrator <= next_integrator;

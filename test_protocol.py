@@ -8,10 +8,13 @@ from protocol import (
     TYPE_PC_CAPTURE,
     TYPE_PC_SET_PHASE,
     TYPE_PC_SET_MODE,
+    TYPE_PC_SET_TARGET,
+    TYPE_PC_TARGET_ACK,
     TYPE_PC_RESULT,
     crc16_ccitt,
     decode_error,
     decode_result,
+    decode_target_ack,
     encode_frame,
 )
 
@@ -53,6 +56,14 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(frame.frame_type, TYPE_PC_SET_MODE)
         self.assertEqual(frame.payload, b"\x0f")
 
+    def test_free_run_target_layout(self) -> None:
+        payload = struct.pack("<IHB", 10_000_000, 9000, 2)
+        encoded = encode_frame(TYPE_PC_SET_TARGET, 5, payload)
+        frame = FrameDecoder().feed(encoded)[0]
+        self.assertEqual(frame.frame_type, TYPE_PC_SET_TARGET)
+        self.assertEqual(struct.unpack("<IHB", frame.payload),
+                         (10_000_000, 9000, 2))
+
     def test_result_layout(self) -> None:
         samples = (2000, 2048, 2100, 2048)
         spectrum = (0, 12, 4)
@@ -67,6 +78,16 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(result.sample_rate, 1_562_500)
         self.assertEqual(result.samples, samples)
         self.assertAlmostEqual(result.peaks[0].frequency_hz, 10_500.0)
+
+    def test_target_ack_layout(self) -> None:
+        payload = struct.pack("<IHBB", 10_000_000, 9000, 2, 0x19)
+        frame = encode_frame(TYPE_PC_TARGET_ACK, 5, payload)
+        decoded = FrameDecoder().feed(frame)[0]
+        ack = decode_target_ack(decoded.payload)
+        self.assertEqual(ack.frequency_millihz, 10_000_000)
+        self.assertEqual(ack.phase_centidegrees, 9000)
+        self.assertEqual(ack.amplitude_code, 2)
+        self.assertEqual(ack.mode, 0x19)
 
     def test_mspm0_error_layout(self) -> None:
         frame = encode_frame(TYPE_ERROR, 4, struct.pack("<H", 3))

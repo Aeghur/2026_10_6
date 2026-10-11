@@ -30,6 +30,7 @@ module dpll_dds_top #(
 
     wire [31:0] phase_lag_word;
     wire [31:0] calibration_phase_word;
+    wire [1:0] loop_profile;
     wire [13:0] configured_amplitude;
     wire output_enable;
     wire config_valid;
@@ -38,6 +39,9 @@ module dpll_dds_top #(
     wire [31:0] phase_increment;
     wire signed [23:0] phase_error;
     wire signed [23:0] signal_magnitude;
+    wire signed [23:0] i_filtered_debug;
+    wire signed [23:0] q_filtered_debug;
+    wire signed [31:0] integrator_debug;
     wire coarse_valid;
     wire mapped_valid;
     wire [13:0] mapped_code;
@@ -46,6 +50,7 @@ module dpll_dds_top #(
     dpll_dds_core #(.ROM_FILE(ROM_FILE)) signal_core (
         .clk(clk_50m), .rst(rst), .sample_valid(sample_valid),
         .adc_sample(sample_data), .adc_otr(sample_otr),
+        .loop_profile(loop_profile),
         .phase_lag_word(phase_lag_word),
         .calibration_phase_word(calibration_phase_word),
         // Hold the physical output at calibrated zero until the loop locks.
@@ -54,6 +59,8 @@ module dpll_dds_top #(
         .dac_clipped(dac_clipped), .locked(locked),
         .signal_present(signal_present), .phase_increment(phase_increment),
         .phase_error(phase_error), .signal_magnitude(signal_magnitude),
+        .i_filtered_debug(i_filtered_debug), .q_filtered_debug(q_filtered_debug),
+        .integrator_debug(integrator_debug),
         .coarse_frequency_valid(coarse_valid)
     );
 
@@ -65,11 +72,14 @@ module dpll_dds_top #(
 
     dpll_uart_bridge #(.CLK_HZ(CLK_HZ), .BAUD(UART_BAUD)) control_link (
         .clk(clk_50m), .rst(rst), .uart_rx(uart_rx), .uart_tx(uart_tx),
-        .phase_lag_word(phase_lag_word),
+        .phase_lag_word(phase_lag_word), .loop_profile(loop_profile),
         .calibration_phase_word(calibration_phase_word),
         .amplitude_code(configured_amplitude), .output_enable(output_enable),
         .config_valid(config_valid), .phase_increment(phase_increment),
-        .phase_error(phase_error), .locked(locked),
+        .phase_error(phase_error), .signal_magnitude(signal_magnitude),
+        .i_filtered(i_filtered_debug), .q_filtered(q_filtered_debug),
+        .integrator_debug(integrator_debug),
+        .locked(locked),
         .signal_present(signal_present), .dac_clipped(dac_clipped),
         .adc_otr(sample_otr), .dac_code(mapped_code)
     );

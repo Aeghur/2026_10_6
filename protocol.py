@@ -8,7 +8,9 @@ MAGIC = b"\xA5\x5A"
 TYPE_PC_CAPTURE = 0x10
 TYPE_PC_SET_PHASE = 0x11
 TYPE_PC_SET_MODE = 0x12
+TYPE_PC_SET_TARGET = 0x13
 TYPE_PC_RESULT = 0x90
+TYPE_PC_TARGET_ACK = 0x93
 TYPE_ERROR = 0xE0
 MAX_PAYLOAD = 20_000
 
@@ -97,6 +99,20 @@ class CaptureResult:
     peaks: tuple[Peak, Peak, Peak]
     samples: tuple[int, ...]
     spectrum: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class TargetAck:
+    frequency_millihz: int
+    phase_centidegrees: int
+    amplitude_code: int
+    mode: int
+
+
+def decode_target_ack(payload: bytes) -> TargetAck:
+    if len(payload) != 8:
+        raise ValueError("TARGET_ACK payload must be 8 bytes")
+    return TargetAck(*struct.unpack("<IHBB", payload))
 
 
 def decode_result(payload: bytes) -> CaptureResult:

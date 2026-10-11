@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import queue
+import struct
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -20,9 +21,12 @@ from protocol import (
     TYPE_PC_CAPTURE,
     TYPE_PC_SET_PHASE,
     TYPE_PC_SET_MODE,
+    TYPE_PC_SET_TARGET,
+    TYPE_PC_TARGET_ACK,
     TYPE_PC_RESULT,
     decode_error,
     decode_result,
+    decode_target_ack,
     encode_frame,
 )
 
@@ -32,8 +36,8 @@ BAUD = 1_000_000
 class ScopeApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        root.title("AD9226 / MSPM0 FFT 测量")
-        root.geometry("1150x760")
+        root.title("AD9226 / MSPM0 波形控制")
+        root.geometry("1350x760")
         self.serial: serial.Serial | None = None
         self.stop_event = threading.Event()
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
@@ -52,7 +56,7 @@ class ScopeApp:
         )
         self.connect_btn.pack(side=tk.LEFT, padx=8)
         self.capture_btn = ttk.Button(
-            bar, text="单次采集", command=self.capture, state=tk.DISABLED
+            bar, text="应用输出", command=self.capture, state=tk.DISABLED
         )
         self.capture_btn.pack(side=tk.LEFT, padx=8)
         ttk.Label(bar, text="目标滞后").pack(side=tk.LEFT, padx=(12, 3))
@@ -63,12 +67,19 @@ class ScopeApp:
         ).pack(side=tk.LEFT)
         ttk.Label(bar, text="°").pack(side=tk.LEFT)
         ttk.Label(bar, text="输出模式").pack(side=tk.LEFT, padx=(12, 3))
-        self.mode_var = tk.StringVar(value="比较器锁相DDS")
+        self.mode_var = tk.StringVar(value="自由运行DDS")
         self.mode_box = ttk.Combobox(
             bar, textvariable=self.mode_var, width=12, state="readonly",
-            values=("流水线延迟", "比较器锁相DDS")
+            values=("自由运行DDS",)
         )
         self.mode_box.pack(side=tk.LEFT)
+        ttk.Label(bar, text="自由频率").pack(side=tk.LEFT, padx=(8, 3))
+        self.target_frequency_var = tk.DoubleVar(value=10.0)
+        ttk.Spinbox(
+            bar, from_=0.9, to=110.0, increment=0.1,
+            textvariable=self.target_frequency_var, width=7
+        ).pack(side=tk.LEFT)
+        ttk.Label(bar, text="kHz").pack(side=tk.LEFT)
         self.frequency_x2_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
             bar, text="2倍频", variable=self.frequency_x2_var
@@ -152,7 +163,8 @@ class ScopeApp:
             self.status.set("目标相位必须位于0～359.99°")
             return
         phase_cdeg = int(round(phase * 100.0))
-        mode = 1 if self.mode_var.get() == "比较器锁相DDS" else 0
+        mode_name = self.mode_var.get()
+        mode = 1 if mode_name != "流水线延迟" else 0
         if mode and self.frequency_x2_var.get():
             mode |= 0x02
         if mode:
@@ -161,25 +173,52 @@ class ScopeApp:
             )
             mode |= amplitude_code << 2
         try:
-            self.serial.write(encode_frame(
-                TYPE_PC_SET_MODE, self.sequence, bytes((mode,))
-            ))
-            self.serial.write(encode_frame(
-                TYPE_PC_SET_PHASE, self.sequence,
-                phase_cdeg.to_bytes(2, "little")
-            ))
-            self.serial.write(encode_frame(TYPE_PC_CAPTURE, self.sequence))
+            if mode_name == "自由运行DDS":
+                try:
+                    frequency_khz = float(self.target_frequency_var.get())
+                except (ValueError, tk.TclError):
+                    self.status.set("自由运行频率必须是0.9～110 kHz的数字")
+                    return
+                if not 0.9 <= frequency_khz <= 110.0:
+                    self.status.set("自由运行频率必须位于0.9～110 kHz")
+                    return
+                output_frequency_khz = frequency_khz * (
+                    2.0 if self.frequency_x2_var.get() else 1.0
+                )
+                if output_frequency_khz > 110.0:
+                    self.status.set("启用2倍频后的输出必须不超过110 kHz")
+                    return
+                amplitude_code = {
+                    "8": 0, "2": 1, "4": 2, "6": 3
+                }.get(self.amplitude_var.get(), 0)
+                target_payload = struct.pack(
+                    "<IHB", int(round(output_frequency_khz * 1_000_000.0)),
+                    phase_cdeg, amplitude_code
+                )
+                self.serial.write(encode_frame(
+                    TYPE_PC_SET_TARGET, self.sequence, target_payload
+                ))
+            else:
+                self.serial.write(encode_frame(
+                    TYPE_PC_SET_MODE, self.sequence, bytes((mode,))
+                ))
+                self.serial.write(encode_frame(
+                    TYPE_PC_SET_PHASE, self.sequence,
+                    phase_cdeg.to_bytes(2, "little")
+                ))
+            if mode_name != "自由运行DDS":
+                self.serial.write(encode_frame(TYPE_PC_CAPTURE, self.sequence))
         except serial.SerialException as exc:
             self.status.set(f"发送失败：{exc}")
             return
         self.capture_btn.config(state=tk.DISABLED)
-        self.status.set("正在等待 FPGA 采集并由 MSPM0 计算 FFT…")
-        self.root.after(2500, lambda sequence=self.sequence: self.capture_timeout(sequence))
+        self.status.set("正在等待 MSPM0 转发确认…")
+        self.root.after(1000, lambda sequence=self.sequence: self.capture_timeout(sequence))
 
     def capture_timeout(self, sequence: int) -> None:
         if sequence == self.sequence and str(self.capture_btn["state"]) == "disabled":
             self.capture_btn.config(state=tk.NORMAL)
-            self.status.set("采集超时：请检查 FPGA 程序、两段 UART 接线和共地")
+            self.status.set("控制确认超时：请检查PC↔MSPM0串口和MSPM0固件")
 
     def reader(self) -> None:
         decoder = FrameDecoder()
@@ -195,6 +234,15 @@ class ScopeApp:
                         else:
                             names = {1: "FPGA响应超时", 2: "FPGA帧格式错误", 3: "FPGA帧CRC错误"}
                             self.events.put(("error", names.get(code, f"MSPM0错误码 {code}")))
+                        continue
+                    if (frame.frame_type == TYPE_PC_TARGET_ACK and
+                            frame.sequence == self.sequence):
+                        try:
+                            ack = decode_target_ack(frame.payload)
+                        except ValueError as exc:
+                            self.events.put(("error", str(exc)))
+                        else:
+                            self.events.put(("target_ack", ack))
                         continue
                     if frame.frame_type != TYPE_PC_RESULT:
                         continue
@@ -220,6 +268,17 @@ class ScopeApp:
                     self.latest = value  # type: ignore[assignment]
                     self.capture_btn.config(state=tk.NORMAL)
                     self.redraw()
+                elif kind == "target_ack":
+                    ack = value
+                    amplitude = {0: 8, 1: 2, 2: 4, 3: 6}.get(
+                        ack.amplitude_code, "?"
+                    )
+                    self.capture_btn.config(state=tk.NORMAL)
+                    self.status.set(
+                        f"MSPM0已转发：{ack.frequency_millihz / 1000:.3f} Hz，"
+                        f"滞后{ack.phase_centidegrees / 100:.2f}°，"
+                        f"幅度{amplitude}/8"
+                    )
                 elif kind == "crc":
                     self.status.set(f"收到错误 CRC 帧，累计新增 {value} 帧")
                     self.capture_btn.config(state=tk.NORMAL)
@@ -278,13 +337,16 @@ class ScopeApp:
         otr = "触发" if result.flags & 1 else "正常"
         dac_clip = "触发" if result.flags & 2 else "正常"
         phase_range = "超范围" if result.flags & 4 else "正常"
-        output_mode = "DDS 2×" if result.flags & 64 else (
-            "DDS 1×" if result.flags & 8 else "流水线"
+        output_mode = "自由运行DDS" if result.flags & 128 else (
+            "DDS 2×" if result.flags & 64 else (
+                "DDS 1×" if result.flags & 8 else "流水线"
+            )
         )
         amplitude_code = (result.flags >> 8) & 0x03
         amplitude_value = {0: 8, 1: 2, 2: 4, 3: 6}[amplitude_code]
         amplitude_text = (
-            f"{amplitude_value}/8输入包络" if result.flags & 8 else "—"
+            (f"{amplitude_value}/8固定满幅" if result.flags & 128 else
+             f"{amplitude_value}/8输入包络") if result.flags & 8 else "—"
         )
         frequency_text = f"FFT输入：{peak_text}"
         if result.flags & 64:

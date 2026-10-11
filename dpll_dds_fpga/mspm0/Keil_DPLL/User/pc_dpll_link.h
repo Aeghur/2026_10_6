@@ -11,10 +11,14 @@ void PC_DPLL_Link_Poll(void);
 bool PC_DPLL_Link_TakePhaseRequest(uint16_t *phaseCentiDegrees);
 bool PC_DPLL_Link_TakeStatusRequest(uint8_t *sequence);
 bool PC_DPLL_Link_TakeRawStatusRequest(uint8_t *sequence);
+bool PC_DPLL_Link_TakeDiagnosticRequest(uint8_t *sequence);
+bool PC_DPLL_Link_TakeLoopProfileRequest(uint8_t *profile);
 void PC_DPLL_Link_SendStatus(
     uint8_t sequence, const DPLL_FPGA_Status *status);
 void PC_DPLL_Link_SendRawStatus(
     uint8_t sequence, const DPLL_FPGA_Status *status);
+void PC_DPLL_Link_SendDiagnostics(
+    uint8_t sequence, const DPLL_FPGA_Diagnostics *diagnostics);
 void PC_DPLL_Link_SendError(uint8_t sequence, uint16_t errorCode);
 
 #endif

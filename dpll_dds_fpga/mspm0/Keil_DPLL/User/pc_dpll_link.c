@@ -5,8 +5,11 @@
 #define PC_TYPE_CAPTURE       (0x10U)
 #define PC_TYPE_SET_PHASE     (0x11U)
 #define PC_TYPE_DPLL_STATUS   (0x12U)
+#define PC_TYPE_LOOP_PROFILE  (0x13U)
+#define PC_TYPE_DIAGNOSTICS   (0x14U)
 #define PC_TYPE_RESULT        (0x90U)
 #define PC_TYPE_DPLL_RESULT   (0x91U)
+#define PC_TYPE_DIAG_RESULT   (0x92U)
 #define PC_TYPE_ERROR         (0xE0U)
 
 // Keep the existing PC result decoder compatible. The DPLL generates a new
@@ -20,6 +23,10 @@ static volatile bool gStatusPending;
 static volatile uint8_t gStatusSequence;
 static volatile bool gRawStatusPending;
 static volatile uint8_t gRawStatusSequence;
+static volatile bool gDiagnosticPending;
+static volatile uint8_t gDiagnosticSequence;
+static volatile bool gLoopProfilePending;
+static volatile uint8_t gLoopProfile;
 static volatile bool gPhasePending;
 static volatile uint16_t gPhaseCentiDegrees;
 static uint8_t gRxState;
@@ -85,6 +92,8 @@ void PC_DPLL_Link_Init(void)
 {
     gStatusPending = false;
     gRawStatusPending = false;
+    gDiagnosticPending = false;
+    gLoopProfilePending = false;
     gPhasePending = false;
     gRxState = 0U;
     NVIC_ClearPendingIRQ(PC_UART_INST_INT_IRQN);
@@ -126,6 +135,32 @@ bool PC_DPLL_Link_TakeRawStatusRequest(uint8_t *sequence)
     }
     *sequence = gRawStatusSequence;
     gRawStatusPending = false;
+    __enable_irq();
+    return true;
+}
+
+bool PC_DPLL_Link_TakeDiagnosticRequest(uint8_t *sequence)
+{
+    __disable_irq();
+    if (!gDiagnosticPending) {
+        __enable_irq();
+        return false;
+    }
+    *sequence = gDiagnosticSequence;
+    gDiagnosticPending = false;
+    __enable_irq();
+    return true;
+}
+
+bool PC_DPLL_Link_TakeLoopProfileRequest(uint8_t *profile)
+{
+    __disable_irq();
+    if (!gLoopProfilePending) {
+        __enable_irq();
+        return false;
+    }
+    *profile = gLoopProfile;
+    gLoopProfilePending = false;
     __enable_irq();
     return true;
 }
@@ -183,6 +218,18 @@ void PC_DPLL_Link_SendRawStatus(
     endFrame(crc);
 }
 
+void PC_DPLL_Link_SendDiagnostics(
+    uint8_t sequence, const DPLL_FPGA_Diagnostics *diagnostics)
+{
+    uint16_t crc;
+    beginFrame(PC_TYPE_DIAG_RESULT, sequence, 8U, &crc);
+    sendU16((uint16_t) diagnostics->iFilteredDiv256, &crc);
+    sendU16((uint16_t) diagnostics->qFilteredDiv256, &crc);
+    sendU16((uint16_t) diagnostics->signalMagnitudeDiv256, &crc);
+    sendU16((uint16_t) diagnostics->integratorDiv32, &crc);
+    endFrame(crc);
+}
+
 void PC_DPLL_Link_Poll(void)
 {
     while (!DL_UART_Main_isRXFIFOEmpty(PC_UART_INST)) {
@@ -197,7 +244,9 @@ void PC_DPLL_Link_Poll(void)
                 break;
             case 2:
                 if (value == PC_TYPE_CAPTURE || value == PC_TYPE_SET_PHASE ||
-                    value == PC_TYPE_DPLL_STATUS) {
+                    value == PC_TYPE_DPLL_STATUS ||
+                    value == PC_TYPE_LOOP_PROFILE ||
+                    value == PC_TYPE_DIAGNOSTICS) {
                     gRxType = value;
                     gRxCrc = crc16Update(0xFFFFU, value);
                     gRxState = 3U;
@@ -218,7 +267,8 @@ void PC_DPLL_Link_Poll(void)
             case 5:
                 gRxCrc = crc16Update(gRxCrc, value);
                 if (value != 0U ||
-                    (gRxLength != 0U && gRxLength != 2U)) {
+                    (gRxLength != 0U && gRxLength != 1U &&
+                     gRxLength != 2U)) {
                     gRxState = 0U;
                 } else if (gRxLength == 0U) {
                     gRxState = 8U;
@@ -227,9 +277,12 @@ void PC_DPLL_Link_Poll(void)
                 }
                 break;
             case 6:
-                gRxPayloadLow = value;
+                if (gRxLength == 1U)
+                    gLoopProfile = value;
+                else
+                    gRxPayloadLow = value;
                 gRxCrc = crc16Update(gRxCrc, value);
-                gRxState = 7U;
+                gRxState = gRxLength == 1U ? 8U : 7U;
                 break;
             case 7:
                 gPhaseCentiDegrees =
@@ -251,6 +304,13 @@ void PC_DPLL_Link_Poll(void)
                                gRxLength == 0U && !gRawStatusPending) {
                         gRawStatusSequence = gRxSequence;
                         gRawStatusPending = true;
+                    } else if (gRxType == PC_TYPE_DIAGNOSTICS &&
+                               gRxLength == 0U && !gDiagnosticPending) {
+                        gDiagnosticSequence = gRxSequence;
+                        gDiagnosticPending = true;
+                    } else if (gRxType == PC_TYPE_LOOP_PROFILE &&
+                               gRxLength == 1U && gLoopProfile <= 2U) {
+                        gLoopProfilePending = true;
                     } else if (gRxType == PC_TYPE_SET_PHASE &&
                                gRxLength == 2U &&
                                gPhaseCentiDegrees < 36000U) {

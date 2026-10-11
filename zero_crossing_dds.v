@@ -14,6 +14,10 @@ module zero_crossing_dds #(
     parameter integer LOOP_KI_EXTRA_SHIFT = 6,
     parameter integer FREQUENCY_TRIM_LIMIT_SHIFT = 2,
     parameter integer RAMP_INCREMENT = 4,
+    // Fixed ADC-equivalent peak used when the source is disconnected.
+    // 1783 codes corresponds to the measured 4 Vpp external input after
+    // the 0.5x input divider.
+    parameter integer FREE_RUN_ENVELOPE_CODES = 1783,
     parameter integer PIPELINE_ADVANCE_SAMPLES = 10,
     parameter integer PHASE_CALIBRATION_LAG_CDEG = 0,
     parameter integer PHASE_CALIBRATION_DELAY_SAMPLES = 0,
@@ -22,6 +26,7 @@ module zero_crossing_dds #(
     input  wire        clk,
     input  wire        rst,
     input  wire        enable,
+    input  wire        free_run,
     input  wire        config_valid,
     input  wire [31:0] config_phase_step,
     input  wire [31:0] config_phase_lag,
@@ -58,7 +63,10 @@ module zero_crossing_dds #(
 
     reg [11:0] envelope = 12'd0;
     reg [11:0] decay_count = 12'd0;
-    assign signal_present = envelope >= SIGNAL_THRESHOLD_CODES;
+    assign signal_present = free_run ? (phase_step != 0) :
+        (envelope >= SIGNAL_THRESHOLD_CODES);
+    wire [11:0] active_envelope = free_run ?
+        FREE_RUN_ENVELOPE_CODES[11:0] : envelope;
 
     // Normalize loop gain with the measured samples/cycle.  This priority
     // encoder is much smaller than a divider and keeps the response similar
@@ -126,9 +134,13 @@ module zero_crossing_dds #(
         64'd36000;
     wire [31:0] calibration_lag_word = frequency_x2 ?
         {CALIBRATION_LAG_WORD[30:0], 1'b0} : CALIBRATION_LAG_WORD;
-    wire [31:0] output_phase =
-        carrier_phase + phase_advance - applied_phase_lag -
-        calibration_delay_product[31:0] - calibration_lag_word;
+    // A free-running waveform has no external phase reference, so its phase
+    // command is applied directly.  Live-lock mode retains all measured
+    // converter and board-delay compensation.
+    wire [31:0] output_phase = free_run ?
+        (carrier_phase - applied_phase_lag) :
+        (carrier_phase + phase_advance - applied_phase_lag -
+         calibration_delay_product[31:0] - calibration_lag_word);
 
     wire signed [15:0] sine_sample;
     reg [11:0] envelope_pipe = 12'd0;
@@ -176,7 +188,7 @@ module zero_crossing_dds #(
             decay_count <= 12'd0;
             locked <= 1'b0;
         end else begin
-            if (reference_edge)
+            if (reference_edge && !free_run)
                 reference_pending <= 1'b1;
             // Period normalization is performed serially because loop
             // updates occur only once per input cycle.  Even at 110 kHz
@@ -201,7 +213,14 @@ module zero_crossing_dds #(
             if (config_valid) begin
                 phase_step <= config_phase_step;
                 phase_lag <= config_phase_lag;
-                if (reacquire) begin
+                if (free_run) begin
+                    locked <= config_phase_step != 0;
+                    frequency_trim <= 33'sd0;
+                    proportional_trim <= 33'sd0;
+                    loop_update_pending <= 1'b0;
+                    reference_pending <= 1'b0;
+                    samples_since_crossing <= 16'hffff;
+                end else if (reacquire) begin
                     locked <= 1'b0;
                     frequency_trim <= 33'sd0;
                     proportional_trim <= 33'sd0;
@@ -234,7 +253,7 @@ module zero_crossing_dds #(
                     decay_count <= decay_count + 1'b1;
                 end
 
-                if (samples_since_crossing != 16'hffff) begin
+                if (!free_run && samples_since_crossing != 16'hffff) begin
                     samples_since_crossing <= samples_since_crossing + 1'b1;
                     if (samples_since_crossing > LOST_CROSSING_SAMPLES) begin
                         // Mark the timeout as handled.  Leaving the saturated
@@ -248,7 +267,7 @@ module zero_crossing_dds #(
                     end
                 end
 
-                if (reference_crossing) begin
+                if (!free_run && reference_crossing) begin
                     reference_pending <= 1'b0;
                     samples_since_crossing <= 16'd0;
                     if (signal_present && phase_step != 0 && !reacquire) begin
@@ -272,7 +291,7 @@ module zero_crossing_dds #(
                 // Exactly one normal accumulator update per sample.  Loop
                 // corrections alter phase slope rather than phase value, so
                 // the sine-ROM address remains continuous at every crossing.
-                if (!(reference_crossing && signal_present &&
+                if (!(!free_run && reference_crossing && signal_present &&
                       phase_step != 0 && !locked && !reacquire))
                     carrier_phase <= carrier_phase + phase_increment_wide[31:0];
             end
@@ -292,9 +311,9 @@ module zero_crossing_dds #(
         end else begin
             if (!enable || !locked) begin
                 amplitude_ramp <= 12'd0;
-            end else if (sample_valid && amplitude_ramp < envelope) begin
-                if ((envelope - amplitude_ramp) <= RAMP_INCREMENT_CODES)
-                    amplitude_ramp <= envelope;
+            end else if (sample_valid && amplitude_ramp < active_envelope) begin
+                if ((active_envelope - amplitude_ramp) <= RAMP_INCREMENT_CODES)
+                    amplitude_ramp <= active_envelope;
                 else
                     amplitude_ramp <= amplitude_ramp + RAMP_INCREMENT_CODES;
             end
@@ -302,7 +321,8 @@ module zero_crossing_dds #(
             rom_valid <= sample_valid && enable && locked;
             if (sample_valid && enable && locked) begin
                 envelope_pipe <= scale_envelope(
-                    (amplitude_ramp < envelope) ? amplitude_ramp : envelope,
+                    (amplitude_ramp < active_envelope) ?
+                        amplitude_ramp : active_envelope,
                     amplitude_scale_code);
             end
 
@@ -328,5 +348,7 @@ module zero_crossing_dds #(
             $display("ERROR: invalid ADC zero code");
         if (LOST_CROSSING_SAMPLES > 65534)
             $display("ERROR: lost-crossing counter is too small");
+        if (FREE_RUN_ENVELOPE_CODES < 0 || FREE_RUN_ENVELOPE_CODES > 4095)
+            $display("ERROR: invalid free-running envelope code");
     end
 endmodule

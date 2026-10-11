@@ -2,8 +2,10 @@
 module dpll_dds_core #(
     parameter integer ADC_ZERO_CODE = 2104,
     parameter integer DAC_ZERO_CODE = 8279,
-    parameter integer LPF_SHIFT = 16,
+    parameter integer LPF_SHIFT = 14,
     parameter integer LOOP_DECIMATION_LOG2 = 10,
+    parameter integer ADC_PIPELINE_SAMPLES = 7,
+    parameter integer DDS_PIPELINE_SAMPLES = 2,
     parameter ROM_FILE = "../rtl/sine_1024x16.hex"
 ) (
     input  wire        clk,
@@ -11,6 +13,7 @@ module dpll_dds_core #(
     input  wire        sample_valid,
     input  wire [11:0] adc_sample,
     input  wire        adc_otr,
+    input  wire [1:0]  loop_profile,
     input  wire [31:0] phase_lag_word,
     input  wire [31:0] calibration_phase_word,
     input  wire [13:0] amplitude_code,
@@ -22,6 +25,9 @@ module dpll_dds_core #(
     output wire [31:0] phase_increment,
     output wire signed [23:0] phase_error,
     output wire signed [23:0] signal_magnitude,
+    output wire signed [23:0] i_filtered_debug,
+    output wire signed [23:0] q_filtered_debug,
+    output wire signed [31:0] integrator_debug,
     output wire        coarse_frequency_valid
 );
     wire signed [12:0] centered_sample =
@@ -40,10 +46,13 @@ module dpll_dds_core #(
     wire detector_valid;
     wire signed [23:0] i_filtered;
     wire signed [23:0] q_filtered;
+    assign i_filtered_debug = i_filtered;
+    assign q_filtered_debug = q_filtered;
     iq_phase_detector #(
         .LPF_SHIFT(LPF_SHIFT), .ROM_FILE(ROM_FILE)
     ) detector (
         .clk(clk), .rst(rst), .sample_valid(sample_valid && !adc_otr),
+        .loop_profile(loop_profile),
         .sample_centered(centered_sample), .local_phase(phase_accumulator),
         .phase_valid(detector_valid), .phase_error(phase_error),
         .signal_magnitude(signal_magnitude),
@@ -54,13 +63,14 @@ module dpll_dds_core #(
     dpll_controller #(
         .LOOP_DECIMATION_LOG2(LOOP_DECIMATION_LOG2)
     ) controller (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .loop_profile(loop_profile),
         .phase_valid(detector_valid), .phase_error(phase_error),
         .signal_magnitude(signal_magnitude),
         .coarse_valid(coarse_frequency_valid),
         .coarse_phase_increment(coarse_phase_increment),
         .phase_increment(phase_increment), .locked(locked),
-        .signal_present(signal_present), .reacquired(reacquired)
+        .signal_present(signal_present), .reacquired(reacquired),
+        .integrator_debug(integrator_debug)
     );
 
     always @(posedge clk) begin
@@ -74,12 +84,21 @@ module dpll_dds_core #(
             phase_accumulator <= phase_accumulator + phase_increment;
     end
 
-    // Advance by two sample intervals to compensate the two-stage DDS mapper.
-    // Remaining converter/analog latency is represented by the configurable
-    // calibration phase word. Positive phase_lag_word means output lag.
+    // AD9226 data represents an analog sample from seven sample clocks ago.
+    // Advance the synthesized output by those seven intervals, plus the two
+    // intervals consumed by the DDS mapper.  The multiplication is by the
+    // compile-time constant nine and wraps naturally in modulo-2^32 phase.
+    localparam integer PIPELINE_ADVANCE_SAMPLES =
+        ADC_PIPELINE_SAMPLES + DDS_PIPELINE_SAMPLES;
+    wire [31:0] pipeline_advance_word =
+        phase_increment * PIPELINE_ADVANCE_SAMPLES;
+
+    // Remaining fractional converter/analog delay is represented by the
+    // configurable calibration phase word. Positive phase_lag_word means
+    // output lag.
     wire [31:0] output_phase =
         phase_accumulator - phase_lag_word + calibration_phase_word +
-        {phase_increment[30:0], 1'b0};
+        pipeline_advance_word;
 
     dds_output #(.DAC_ZERO_CODE(DAC_ZERO_CODE), .ROM_FILE(ROM_FILE)) output_dds (
         .clk(clk), .rst(rst), .sample_valid(sample_valid),

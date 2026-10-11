@@ -221,9 +221,73 @@ module tb_ads805;
             errors = errors + 1;
         end
         release dut.measured_phase_step;
+        // The testbench did not consume the preceding command ACK.  Let its
+        // eight UART bytes finish before checking the next ACK frame.
+        #50000;
+
+        // Bit 4 selects autonomous DDS.  The commanded phase step must be
+        // used directly even when T14 has no edges and ADC is not a sine.
+        calculated_crc = 16'hffff;
+        calculated_crc = crc16_next(calculated_crc, 8'h04);
+        calculated_crc = crc16_next(calculated_crc, 8'h3a);
+        calculated_crc = crc16_next(calculated_crc, 8'h09);
+        calculated_crc = crc16_next(calculated_crc, 8'h00);
+        calculated_crc = crc16_next(calculated_crc, 8'h11);
+        calculated_crc = crc16_next(calculated_crc, 8'h44);
+        calculated_crc = crc16_next(calculated_crc, 8'h33);
+        calculated_crc = crc16_next(calculated_crc, 8'h22);
+        calculated_crc = crc16_next(calculated_crc, 8'h11);
+        calculated_crc = crc16_next(calculated_crc, 8'h00);
+        calculated_crc = crc16_next(calculated_crc, 8'h00);
+        calculated_crc = crc16_next(calculated_crc, 8'h00);
+        calculated_crc = crc16_next(calculated_crc, 8'h40);
+        fork
+            begin
+                send_uart_byte(8'ha5);
+                send_uart_byte(8'h5a);
+                send_uart_byte(8'h04);
+                send_uart_byte(8'h3a);
+                send_uart_byte(8'h09);
+                send_uart_byte(8'h00);
+                send_uart_byte(8'h11);
+                send_uart_byte(8'h44);
+                send_uart_byte(8'h33);
+                send_uart_byte(8'h22);
+                send_uart_byte(8'h11);
+                send_uart_byte(8'h00);
+                send_uart_byte(8'h00);
+                send_uart_byte(8'h00);
+                send_uart_byte(8'h40);
+                send_uart_byte(calculated_crc[7:0]);
+                send_uart_byte(calculated_crc[15:8]);
+            end
+            begin
+                for (i = 0; i < 8; i = i + 1)
+                    receive_uart_byte(frame[i]);
+            end
+        join
+        calculated_crc = 16'hffff;
+        for (i = 2; i < 6; i = i + 1)
+            calculated_crc = crc16_next(calculated_crc, frame[i]);
+        received_crc = {frame[7], frame[6]};
+        if ({frame[1], frame[0]} !== 16'h5aa5 ||
+            frame[2] !== 8'h84 || frame[3] !== 8'h3a ||
+            {frame[5], frame[4]} !== 16'd0 ||
+            received_crc !== calculated_crc) begin
+            $display("FAIL: OUTPUT_ACK frame");
+            errors = errors + 1;
+        end
+        #2000;
+        if (dut.output_free_run !== 1'b1 ||
+            dut.dds_phase_step !== 32'h11223344 ||
+            dut.dds_locked !== 1'b1 ||
+            dut.dds_signal_present !== 1'b1) begin
+            $display("FAIL: free-running DDS command was not applied");
+            errors = errors + 1;
+        end
 
         if (errors == 0)
-            $display("PASS: capture, delay and switchable DDS commands");
+            $display("PASS: capture, delay, DDS commands and OUTPUT_ACK");
         else
             $display("FAIL: %0d errors", errors);
         $finish;

@@ -14,6 +14,7 @@ Keil入口：`Project/dpll_dds.uvprojx`。
 - 查询FPGA频率、锁定、OTR和DAC削顶状态；
 - 保持现有`scope.py`的设置相位、单次采集和结果帧兼容。
 - 支持`dpll_control.py`实时读取频率、锁定、相位误差和DAC码。
+- 支持legacy、balanced、fast三档环路配置以及I/Q、模长、积分器扩展诊断。
 
 PC UART1的时钟分频、中断方式和引脚配置与已上板验证可通信的旧工程保持一致；
 FPGA UART4状态查询带有限超时，FPGA未连接时MSPM0仍会及时向PC返回错误帧。
@@ -49,12 +50,13 @@ FPGA UART4状态查询带有限超时，FPGA未连接时MSPM0仍会及时向PC�
 ```powershell
 cd E:\eishero2q\ad9226
 python -m pip install -r requirements.txt
-python dpll_control.py --port COM6 --phase 0
+python dpll_control.py --port COM6 --phase 0 --loop-profile balanced
 ```
 
 将`COM6`换成设备管理器中USB-TTL对应端口。按`Ctrl+C`停止；测试90°时重新运行
 并改为`--phase 90`。脚本每250 ms显示频率、锁定、输入有效、环路相位误差、
-当前DAC码、削顶和ADC OTR。
+I/Q、信号模长、积分器、当前DAC码、削顶和ADC OTR。若需要验证旧16字节状态
+协议，可增加`--basic`。
 
 上电后MSPM0会自动向FPGA发送0°、幅度2143、相位校准180°、输出使能的默认配置。
 180°固定校准来自40 kHz上板验证：未校准时物理输入/输出约反相，临时设置

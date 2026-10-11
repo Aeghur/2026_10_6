@@ -261,6 +261,7 @@ bool Keypad_Control_HandleKey(
     }
 
     if (key == 'D') {
+        *outputMode &= (uint8_t) ~MEASUREMENT_MODE_FREE_RUN;
         *outputMode |= MEASUREMENT_MODE_DDS_MASK;
         *outputMode ^= MEASUREMENT_MODE_X2_MASK;
         return true;

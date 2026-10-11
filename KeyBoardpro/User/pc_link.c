@@ -2,28 +2,29 @@
 
 #include "msp_uart_link.h"
 
-#define FRAME_TYPE_CAPTURE (0x10U)
 #define FRAME_TYPE_SET_PHASE (0x11U)
 #define FRAME_TYPE_SET_MODE  (0x12U)
-#define FRAME_TYPE_RESULT  (0x90U)
+#define FRAME_TYPE_SET_TARGET (0x13U)
+#define FRAME_TYPE_TARGET_ACK (0x93U)
 #define FRAME_TYPE_ERROR   (0xE0U)
-#define RESULT_PAYLOAD_SIZE \
-    (10U + 18U + MEASUREMENT_FFT_SIZE * 2U + \
-     MEASUREMENT_SPECTRUM_COUNT * 2U)
 
-static volatile bool gCapturePending;
-static volatile uint8_t gCaptureSequence;
 static volatile bool gPhasePending;
 static volatile uint16_t gPhaseCentiDegrees;
 static volatile bool gModePending;
 static volatile uint8_t gOutputMode;
+static volatile bool gTargetPending;
+static volatile uint8_t gTargetSequence;
+static volatile uint32_t gTargetFrequencyMilliHz;
+static volatile uint16_t gTargetPhaseCentiDegrees;
+static volatile uint8_t gTargetAmplitudeCode;
 static uint8_t gRxState;
 static uint8_t gRxType;
 static uint8_t gRxSequence;
 static uint8_t gRxCrcLow;
 static uint16_t gRxCrc;
 static uint8_t gRxLength;
-static uint8_t gRxPayloadLow;
+static uint8_t gRxPayload[7];
+static uint8_t gRxPayloadIndex;
 
 static uint16_t crc16Update(uint16_t crc, uint8_t value)
 {
@@ -81,12 +82,30 @@ static void endFrame(uint16_t crc)
 
 void PC_Link_Init(void)
 {
-    gCapturePending = false;
     gPhasePending = false;
     gModePending = false;
+    gTargetPending = false;
     gRxState = 0U;
     NVIC_ClearPendingIRQ(PC_UART_INST_INT_IRQN);
     NVIC_EnableIRQ(PC_UART_INST_INT_IRQN);
+}
+
+bool PC_Link_TakeTargetRequest(
+    uint8_t *sequence, uint32_t *frequencyMilliHz,
+    uint16_t *phaseCentiDegrees, uint8_t *amplitudeCode)
+{
+    __disable_irq();
+    if (!gTargetPending) {
+        __enable_irq();
+        return false;
+    }
+    *sequence = gTargetSequence;
+    *frequencyMilliHz = gTargetFrequencyMilliHz;
+    *phaseCentiDegrees = gTargetPhaseCentiDegrees;
+    *amplitudeCode = gTargetAmplitudeCode;
+    gTargetPending = false;
+    __enable_irq();
+    return true;
 }
 
 bool PC_Link_TakeModeRequest(uint8_t *mode)
@@ -115,42 +134,17 @@ bool PC_Link_TakePhaseRequest(uint16_t *phaseCentiDegrees)
     return true;
 }
 
-bool PC_Link_TakeCaptureRequest(uint8_t *sequence)
-{
-    __disable_irq();
-    if (!gCapturePending) {
-        __enable_irq();
-        return false;
-    }
-    *sequence = gCaptureSequence;
-    gCapturePending = false;
-    __enable_irq();
-    return true;
-}
-
-void PC_Link_SendResult(
-    uint8_t sequence,
-    uint16_t flags,
-    const MeasurementPeak peaks[MEASUREMENT_PEAK_COUNT],
-    const uint16_t *samples,
-    const uint16_t *spectrum)
+void PC_Link_SendTargetAck(
+    uint8_t sequence, uint32_t frequencyMilliHz,
+    uint16_t phaseCentiDegrees, uint8_t amplitudeCode, uint8_t mode)
 {
     uint16_t crc;
-    uint32_t index;
 
-    beginFrame(FRAME_TYPE_RESULT, sequence, RESULT_PAYLOAD_SIZE, &crc);
-    sendU32(MEASUREMENT_SAMPLE_RATE_HZ, &crc);
-    sendU16(MEASUREMENT_FFT_SIZE, &crc);
-    sendU16(MEASUREMENT_SPECTRUM_COUNT, &crc);
-    sendU16(flags, &crc);
-    for (index = 0U; index < MEASUREMENT_PEAK_COUNT; index++) {
-        sendU32(peaks[index].frequencyMilliHz, &crc);
-        sendU16(peaks[index].magnitude, &crc);
-    }
-    for (index = 0U; index < MEASUREMENT_FFT_SIZE; index++)
-        sendU16(samples[index], &crc);
-    for (index = 0U; index < MEASUREMENT_SPECTRUM_COUNT; index++)
-        sendU16(spectrum[index], &crc);
+    beginFrame(FRAME_TYPE_TARGET_ACK, sequence, 8U, &crc);
+    sendU32(frequencyMilliHz, &crc);
+    sendU16(phaseCentiDegrees, &crc);
+    sendCheckedByte(amplitudeCode, &crc);
+    sendCheckedByte(mode, &crc);
     endFrame(crc);
 }
 
@@ -175,9 +169,9 @@ void UART1_IRQHandler(void)
                            value == 0xA5U ? 1U : 0U;
                 break;
             case 2:
-                if (value == FRAME_TYPE_CAPTURE ||
-                    value == FRAME_TYPE_SET_PHASE ||
-                    value == FRAME_TYPE_SET_MODE) {
+                if (value == FRAME_TYPE_SET_PHASE ||
+                    value == FRAME_TYPE_SET_MODE ||
+                    value == FRAME_TYPE_SET_TARGET) {
                     gRxType = value;
                     gRxCrc = crc16Update(0xFFFFU, value);
                     gRxLength = 0U;
@@ -199,15 +193,13 @@ void UART1_IRQHandler(void)
             case 5:
                 gRxCrc = crc16Update(gRxCrc, value);
                 if (value != 0U ||
-                    (gRxType == FRAME_TYPE_CAPTURE &&
-                     gRxLength != 0U) ||
                     (gRxType == FRAME_TYPE_SET_PHASE &&
                      gRxLength != 2U) ||
                     (gRxType == FRAME_TYPE_SET_MODE &&
-                     gRxLength != 1U)) {
+                     gRxLength != 1U) ||
+                    (gRxType == FRAME_TYPE_SET_TARGET &&
+                     gRxLength != 7U)) {
                     gRxState = 0U;
-                } else if (gRxLength == 0U) {
-                    gRxState = 8U;
                 } else {
                     gRxState = 6U;
                 }
@@ -219,15 +211,17 @@ void UART1_IRQHandler(void)
                     gOutputMode = value;
                     gRxState = 8U;
                 } else {
-                    gRxPayloadLow = value;
-                    gRxState = 7U;
+                    gRxPayloadIndex = 0U;
+                    gRxPayload[0] = value;
+                    gRxState = gRxLength == 1U ? 8U : 7U;
                 }
                 break;
             case 7:
-                gPhaseCentiDegrees =
-                    (uint16_t) gRxPayloadLow | ((uint16_t) value << 8);
                 gRxCrc = crc16Update(gRxCrc, value);
-                gRxState = 8U;
+                gRxPayloadIndex++;
+                gRxPayload[gRxPayloadIndex] = value;
+                if (gRxPayloadIndex + 1U == gRxLength)
+                    gRxState = 8U;
                 break;
             case 8:
                 gRxCrcLow = value;
@@ -235,20 +229,42 @@ void UART1_IRQHandler(void)
                 break;
             case 9:
                 if ((((uint16_t) value << 8) | gRxCrcLow) == gRxCrc) {
-                    if (gRxType == FRAME_TYPE_CAPTURE &&
-                        gRxLength == 0U && !gCapturePending) {
-                        gCaptureSequence = gRxSequence;
-                        gCapturePending = true;
-                    } else if (gRxType == FRAME_TYPE_SET_PHASE &&
+                    if (gRxType == FRAME_TYPE_SET_PHASE &&
                                gRxLength == 2U &&
-                               gPhaseCentiDegrees < 36000U) {
+                               ((uint16_t) gRxPayload[0] |
+                                ((uint16_t) gRxPayload[1] << 8)) < 36000U) {
+                        gPhaseCentiDegrees =
+                            (uint16_t) gRxPayload[0] |
+                            ((uint16_t) gRxPayload[1] << 8);
                         gPhasePending = true;
                     } else if (gRxType == FRAME_TYPE_SET_MODE &&
                                gRxLength == 1U &&
                                (gOutputMode == MEASUREMENT_MODE_PIPELINE ||
                                 ((gOutputMode & MEASUREMENT_MODE_DDS_MASK) != 0U &&
-                                 (gOutputMode & 0xF0U) == 0U))) {
+                                 (gOutputMode & 0xE0U) == 0U))) {
                         gModePending = true;
+                    } else if (gRxType == FRAME_TYPE_SET_TARGET &&
+                               gRxLength == 7U) {
+                        uint32_t frequency =
+                            (uint32_t) gRxPayload[0] |
+                            ((uint32_t) gRxPayload[1] << 8) |
+                            ((uint32_t) gRxPayload[2] << 16) |
+                            ((uint32_t) gRxPayload[3] << 24);
+                        uint16_t phase =
+                            (uint16_t) gRxPayload[4] |
+                            ((uint16_t) gRxPayload[5] << 8);
+                        uint8_t amplitude = gRxPayload[6];
+                        if (frequency >=
+                                MEASUREMENT_MIN_SPECTRUM_HZ * 1000UL &&
+                            frequency <=
+                                MEASUREMENT_MAX_SPECTRUM_HZ * 1000UL &&
+                            phase < 36000U && amplitude < 4U) {
+                            gTargetFrequencyMilliHz = frequency;
+                            gTargetPhaseCentiDegrees = phase;
+                            gTargetAmplitudeCode = amplitude;
+                            gTargetSequence = gRxSequence;
+                            gTargetPending = true;
+                        }
                     }
                 }
                 gRxState = 0U;

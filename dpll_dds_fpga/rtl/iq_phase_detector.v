@@ -4,12 +4,13 @@
 //   Q = LPF(x*sin(local)) = A/2*cos(input-local)
 // atan2(I,Q) therefore returns signed input_phase-local_phase.
 module iq_phase_detector #(
-    parameter integer LPF_SHIFT = 16,
+    parameter integer LPF_SHIFT = 14,
     parameter ROM_FILE = "../rtl/sine_1024x16.hex"
 ) (
     input  wire               clk,
     input  wire               rst,
     input  wire               sample_valid,
+    input  wire [1:0]         loop_profile,
     input  wire signed [12:0] sample_centered,
     input  wire [31:0]        local_phase,
     output wire               phase_valid,
@@ -32,6 +33,7 @@ module iq_phase_detector #(
     reg delayed_valid = 1'b0;
     reg signed [39:0] i_lpf = 40'sd0;
     reg signed [39:0] q_lpf = 40'sd0;
+    reg [1:0] legacy_filter_count = 2'd0;
 
     wire signed [28:0] i_product =
         $signed(delayed_sample) * $signed(local_cosine);
@@ -39,6 +41,10 @@ module iq_phase_detector #(
         $signed(delayed_sample) * $signed(local_sine);
     wire signed [39:0] i_product_extended = {{11{i_product[28]}}, i_product};
     wire signed [39:0] q_product_extended = {{11{q_product[28]}}, q_product};
+    // LPF arithmetic stays fixed to avoid wide runtime shifters.  Legacy
+    // updates once per four samples (about 61 Hz effective cutoff); balanced
+    // and fast update every sample (about 243 Hz at 25 MSPS).
+    wire update_filter = loop_profile != 2'd0 || legacy_filter_count == 2'd3;
 
     always @(posedge clk) begin
         if (rst) begin
@@ -46,13 +52,20 @@ module iq_phase_detector #(
             delayed_valid <= 1'b0;
             i_lpf <= 40'sd0;
             q_lpf <= 40'sd0;
+            legacy_filter_count <= 2'd0;
         end else begin
             delayed_valid <= sample_valid;
             if (sample_valid)
                 delayed_sample <= sample_centered;
             if (delayed_valid) begin
-                i_lpf <= i_lpf + ((i_product_extended - i_lpf) >>> LPF_SHIFT);
-                q_lpf <= q_lpf + ((q_product_extended - q_lpf) >>> LPF_SHIFT);
+                if (loop_profile == 2'd0)
+                    legacy_filter_count <= legacy_filter_count + 1'b1;
+                else
+                    legacy_filter_count <= 2'd0;
+                if (update_filter) begin
+                    i_lpf <= i_lpf + ((i_product_extended - i_lpf) >>> LPF_SHIFT);
+                    q_lpf <= q_lpf + ((q_product_extended - q_lpf) >>> LPF_SHIFT);
+                end
             end
         end
     end
@@ -62,8 +75,10 @@ module iq_phase_detector #(
         begin
             if (value > 40'sd8388607)
                 saturate_q23 = 24'sd8388607;
-            else if (value < -40'sd8388608)
-                saturate_q23 = -24'sd8388608;
+            // Hex encodes -2^23 directly in two's complement.  Negating a
+            // decimal signed literal makes Quartus report constant overflow.
+            else if (value < 40'shffff800000)
+                saturate_q23 = 24'sh800000;
             else
                 saturate_q23 = value[23:0];
         end

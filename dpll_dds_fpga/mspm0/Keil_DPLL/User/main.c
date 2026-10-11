@@ -12,12 +12,15 @@
 // synthesized output so a PC command of 0 degrees is physically in phase.
 #define DEFAULT_CALIBRATION_WORD (0x80000000UL)
 #define DEFAULT_AMPLITUDE_CODE   (2143U)
+#define DEFAULT_LOOP_PROFILE     DPLL_LOOP_BALANCED
 
 int main(void)
 {
     DPLL_FPGA_Status status;
+    DPLL_FPGA_Diagnostics diagnostics;
     uint16_t targetPhase = DEFAULT_PHASE_CDEG;
     uint16_t requestedPhase;
+    uint8_t requestedProfile;
     uint8_t pcSequence;
     uint8_t fpgaSequence = 0U;
 
@@ -29,6 +32,8 @@ int main(void)
     DPLL_FPGA_SendConfig(
         fpgaSequence, targetPhase, DEFAULT_CALIBRATION_WORD,
         DEFAULT_AMPLITUDE_CODE, true);
+    fpgaSequence++;
+    DPLL_FPGA_SendLoopProfile(fpgaSequence, DEFAULT_LOOP_PROFILE);
 
     while (1) {
         if (PC_DPLL_Link_TakePhaseRequest(&requestedPhase)) {
@@ -37,6 +42,12 @@ int main(void)
             DPLL_FPGA_SendConfig(
                 fpgaSequence, targetPhase, DEFAULT_CALIBRATION_WORD,
                 DEFAULT_AMPLITUDE_CODE, true);
+        }
+
+        if (PC_DPLL_Link_TakeLoopProfileRequest(&requestedProfile)) {
+            fpgaSequence++;
+            DPLL_FPGA_SendLoopProfile(
+                fpgaSequence, (DPLL_FPGA_LoopProfile) requestedProfile);
         }
 
         if (PC_DPLL_Link_TakeStatusRequest(&pcSequence)) {
@@ -55,6 +66,17 @@ int main(void)
             result = DPLL_FPGA_ReadStatus(fpgaSequence, &status);
             if (result == DPLL_FPGA_OK)
                 PC_DPLL_Link_SendRawStatus(pcSequence, &status);
+            else
+                PC_DPLL_Link_SendError(pcSequence, (uint16_t) result);
+        }
+
+
+        if (PC_DPLL_Link_TakeDiagnosticRequest(&pcSequence)) {
+            DPLL_FPGA_Result result;
+            fpgaSequence++;
+            result = DPLL_FPGA_ReadDiagnostics(fpgaSequence, &diagnostics);
+            if (result == DPLL_FPGA_OK)
+                PC_DPLL_Link_SendDiagnostics(pcSequence, &diagnostics);
             else
                 PC_DPLL_Link_SendError(pcSequence, (uint16_t) result);
         }

@@ -49,6 +49,7 @@ void MSP_UART_Link_Init(void)
     DL_UART_Main_init(PC_UART_INST, &gPcConfig);
     DL_UART_Main_setOversampling(
         PC_UART_INST, DL_UART_OVERSAMPLING_RATE_16X);
+    // UART BUSCLK is the 40 MHz ULPCLK.  2 + 32/64 at 16x = 1 Mbaud.
     DL_UART_Main_setBaudRateDivisor(PC_UART_INST, 2U, 32U);
     DL_UART_Main_enableFIFOs(PC_UART_INST);
     DL_UART_Main_setRXFIFOThreshold(
@@ -63,6 +64,8 @@ void MSP_UART_Link_Init(void)
     DL_UART_Main_init(FPGA_UART_INST, &gFpgaConfig);
     DL_UART_Main_setOversampling(
         FPGA_UART_INST, DL_UART_OVERSAMPLING_RATE_16X);
+    // UART4 is on the PD1 peripheral bus, so BUSCLK is the 80 MHz MCLK.
+    // 2 + 32/64 at 16x = 2 Mbaud, matching ads805.UART_BAUD.
     DL_UART_Main_setBaudRateDivisor(FPGA_UART_INST, 2U, 32U);
     DL_UART_Main_enableFIFOs(FPGA_UART_INST);
     DL_UART_Main_setRXFIFOThreshold(

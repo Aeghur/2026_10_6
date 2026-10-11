@@ -9,6 +9,7 @@
 #define FPGA_TYPE_SET_DELAY     (0x03U)
 #define FPGA_TYPE_SET_OUTPUT    (0x04U)
 #define FPGA_TYPE_SAMPLES       (0x81U)
+#define FPGA_TYPE_OUTPUT_ACK    (0x84U)
 #define FPGA_PAYLOAD_SIZE       (8U + MEASUREMENT_FFT_SIZE * 2U)
 #define FPGA_BYTE_TIMEOUT_LOOPS (4000000UL)
 
@@ -33,6 +34,8 @@ static bool receiveByte(uint8_t *value)
     *value = DL_UART_Main_receiveData(FPGA_UART_INST);
     return true;
 }
+
+static bool readCheckedByte(uint8_t *value, uint16_t *crc);
 
 static void sendCaptureCommand(uint8_t sequence)
 {
@@ -76,13 +79,22 @@ void FPGA_Capture_SetDelay(uint8_t sequence, uint16_t delaySamples)
         DL_UART_Main_transmitDataBlocking(FPGA_UART_INST, frame[index]);
 }
 
-void FPGA_Capture_SetOutput(
+FPGA_CaptureStatus FPGA_Capture_SetOutput(
     uint8_t sequence, uint8_t mode, uint32_t phaseStep,
     uint32_t phaseLag)
 {
     uint8_t frame[17];
+    uint8_t value;
+    uint8_t previous = 0U;
+    uint8_t header[4];
+    uint8_t crcLow;
+    uint8_t crcHigh;
     uint16_t crc = 0xFFFFU;
+    uint16_t receivedCrc;
     uint8_t index;
+
+    while (!DL_UART_Main_isRXFIFOEmpty(FPGA_UART_INST))
+        (void) DL_UART_Main_receiveData(FPGA_UART_INST);
 
     frame[0] = 0xA5U;
     frame[1] = 0x5AU;
@@ -105,6 +117,28 @@ void FPGA_Capture_SetOutput(
     frame[16] = (uint8_t) (crc >> 8);
     for (index = 0U; index < sizeof(frame); index++)
         DL_UART_Main_transmitDataBlocking(FPGA_UART_INST, frame[index]);
+
+    do {
+        if (!receiveByte(&value))
+            return FPGA_CAPTURE_TIMEOUT;
+        if (previous == 0xA5U && value == 0x5AU)
+            break;
+        previous = value;
+    } while (1);
+
+    crc = 0xFFFFU;
+    for (index = 0U; index < sizeof(header); index++) {
+        if (!readCheckedByte(&header[index], &crc))
+            return FPGA_CAPTURE_TIMEOUT;
+    }
+    if (header[0] != FPGA_TYPE_OUTPUT_ACK ||
+        header[1] != sequence || header[2] != 0U || header[3] != 0U)
+        return FPGA_CAPTURE_FORMAT_ERROR;
+    if (!receiveByte(&crcLow) || !receiveByte(&crcHigh))
+        return FPGA_CAPTURE_TIMEOUT;
+    receivedCrc = (uint16_t) crcLow | ((uint16_t) crcHigh << 8);
+    return receivedCrc == crc ?
+        FPGA_CAPTURE_OK : FPGA_CAPTURE_CRC_ERROR;
 }
 
 static bool readCheckedByte(uint8_t *value, uint16_t *crc)

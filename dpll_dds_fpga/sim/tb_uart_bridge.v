@@ -9,10 +9,11 @@ module tb_uart_bridge;
     wire [31:0] calibration_phase_word;
     wire [13:0] amplitude_code;
     wire output_enable;
+    wire [1:0] loop_profile;
     wire config_valid;
     integer errors = 0;
     integer response_count = 0;
-    reg [7:0] response [0:23];
+    reg [7:0] response [0:39];
 
     wire [7:0] monitor_data;
     wire monitor_valid;
@@ -22,11 +23,13 @@ module tb_uart_bridge;
 
     dpll_uart_bridge #(.CLK_HZ(50_000_000), .BAUD(5_000_000)) dut (
         .clk(clk), .rst(rst), .uart_rx(uart_rx), .uart_tx(uart_tx),
-        .phase_lag_word(phase_lag_word),
+        .phase_lag_word(phase_lag_word), .loop_profile(loop_profile),
         .calibration_phase_word(calibration_phase_word),
         .amplitude_code(amplitude_code), .output_enable(output_enable),
         .config_valid(config_valid), .phase_increment(32'h12345678),
-        .phase_error(-24'sd12345), .locked(1'b1),
+        .phase_error(-24'sd12345), .signal_magnitude(24'sd456789),
+        .i_filtered(24'sd111111), .q_filtered(-24'sd222222),
+        .integrator_debug(32'sd333333), .locked(1'b1),
         .signal_present(1'b1), .dac_clipped(1'b0), .adc_otr(1'b0),
         .dac_code(14'd8279)
     );
@@ -37,7 +40,7 @@ module tb_uart_bridge;
     );
 
     always @(posedge clk)
-        if (monitor_valid && response_count < 24) begin
+        if (monitor_valid && response_count < 40) begin
             response[response_count] <= monitor_data;
             response_count <= response_count + 1;
         end
@@ -68,6 +71,35 @@ module tb_uart_bridge;
             end
             uart_rx = 1'b1;
             repeat (CLKS_PER_BIT) @(posedge clk);
+        end
+    endtask
+
+    task send_loop_profile;
+        input [7:0] profile;
+        reg [15:0] crc;
+        begin
+            crc=16'hffff;
+            crc=crc16_next(crc,8'h11); crc=crc16_next(crc,8'h09);
+            crc=crc16_next(crc,8'h01); crc=crc16_next(crc,8'h00);
+            crc=crc16_next(crc,profile);
+            send_uart_byte(8'ha5); send_uart_byte(8'h5a);
+            send_uart_byte(8'h11); send_uart_byte(8'h09);
+            send_uart_byte(8'h01); send_uart_byte(8'h00);
+            send_uart_byte(profile);
+            send_uart_byte(crc[7:0]); send_uart_byte(crc[15:8]);
+        end
+    endtask
+
+    task send_diagnostic_request;
+        reg [15:0] crc;
+        begin
+            crc=16'hffff;
+            crc=crc16_next(crc,8'h02); crc=crc16_next(crc,8'h0a);
+            crc=crc16_next(crc,8'h00); crc=crc16_next(crc,8'h00);
+            send_uart_byte(8'ha5); send_uart_byte(8'h5a);
+            send_uart_byte(8'h02); send_uart_byte(8'h0a);
+            send_uart_byte(8'h00); send_uart_byte(8'h00);
+            send_uart_byte(crc[7:0]); send_uart_byte(crc[15:8]);
         end
     endtask
 
@@ -136,6 +168,27 @@ module tb_uart_bridge;
         end
         if (monitor_error) begin
             $display("FAIL: monitor framing error");
+            errors = errors + 1;
+        end
+        response_count = 0;
+        send_loop_profile(8'd2);
+        repeat (20) @(posedge clk);
+        if (loop_profile !== 2'd2) begin
+            $display("FAIL: loop profile config=%0d", loop_profile);
+            errors = errors + 1;
+        end
+        send_diagnostic_request();
+        timeout = 30000;
+        while (response_count < 16 && timeout > 0) begin
+            @(posedge clk);
+            timeout = timeout - 1;
+        end
+        if (response_count != 16 || response[2] !== 8'h91 ||
+            response[3] !== 8'h0a || response[4] !== 8'd8 ||
+            $signed({response[7],response[6]}) !== 16'sd434 ||
+            $signed({response[9],response[8]}) !== -16'sd869 ||
+            $signed({response[13],response[12]}) !== 16'sd10416) begin
+            $display("FAIL: diagnostic response count=%0d", response_count);
             errors = errors + 1;
         end
         if (errors == 0)

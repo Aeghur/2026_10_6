@@ -36,6 +36,16 @@ try {
         (Join-Path $rtl 'dds_output.v'),
         (Join-Path $rtl 'dpll_dds_core.v'),
         (Join-Path $sim 'tb_dpll_dds_core.v'))
+    Invoke-Test 'dpll_high_band' @(
+        (Join-Path $rtl 'unsigned_serial_divider.v'),
+        (Join-Path $rtl 'coarse_frequency_estimator.v'),
+        (Join-Path $rtl 'sine_rom_dp.v'),
+        (Join-Path $rtl 'cordic_atan2.v'),
+        (Join-Path $rtl 'iq_phase_detector.v'),
+        (Join-Path $rtl 'dpll_controller.v'),
+        (Join-Path $rtl 'dds_output.v'),
+        (Join-Path $rtl 'dpll_dds_core.v'),
+        (Join-Path $sim 'tb_dpll_high_band.v'))
     Invoke-Test 'uart' @(
         (Join-Path $rtl 'dpll_uart_rx.v'),
         (Join-Path $rtl 'dpll_uart_tx.v'),

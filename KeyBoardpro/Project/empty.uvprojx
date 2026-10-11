@@ -480,16 +480,6 @@
               <FilePath>..\User\fpga_capture.h</FilePath>
             </File>
             <File>
-              <FileName>fft_analyzer.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\User\fft_analyzer.c</FilePath>
-            </File>
-            <File>
-              <FileName>fft_analyzer.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\User\fft_analyzer.h</FilePath>
-            </File>
-            <File>
               <FileName>pc_link.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\pc_link.c</FilePath>
@@ -508,16 +498,6 @@
               <FileName>ti_msp_dl_config.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\User\ti_msp_dl_config.h</FilePath>
-            </File>
-          </Files>
-        </Group>
-        <Group>
-          <GroupName>CMSIS-DSP</GroupName>
-          <Files>
-            <File>
-              <FileName>arm_cortexM0l_math.a</FileName>
-              <FileType>4</FileType>
-              <FilePath>..\Source\third_party\CMSIS\DSP\Lib\keil\m0p\arm_cortexM0l_math.a</FilePath>
             </File>
           </Files>
         </Group>
