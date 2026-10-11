@@ -7,10 +7,12 @@ module ads805 #(
     parameter integer DECIMATION      = 64,
     parameter integer CAPTURE_SAMPLES = 4096,
     parameter integer DELAY_DEPTH     = 8192,
-    // 2026-10-02 bench calibration at 10 kHz, scope high-Z load.
+    // 2026-10-07 bench calibration after the input divider and 5x output
+    // amplifier changes.  A 4 Vpp input measured 1.1758 Vpp at the 2/8
+    // setting, so the previous gain is corrected by 1.0 / 1.1758.
     parameter integer ADC_ZERO_CODE   = 2104,
     parameter integer DAC_ZERO_CODE   = 8279,
-    parameter integer DAC_GAIN_Q16    = 318171,
+    parameter integer DAC_GAIN_Q16    = 270600,
     parameter integer DAC_INVERT      = 0,
     parameter integer DDS_PIPELINE_ADVANCE_SAMPLES = 10,
     // DDS 0-degree sweep, 1...100 kHz, 2026-10-06.
