@@ -19,6 +19,7 @@ from vision_calibrator import Camera, LensCorrector, ROOT
 STRATEGY_ROOT = ROOT / "board_strategy"
 sys.path.insert(0, str(STRATEGY_ROOT))
 
+from frequency_centerline import FrequencyStageBackend  # noqa: E402
 from lissajous_control import (  # noqa: E402
     Capabilities,
     Controller,
@@ -224,6 +225,11 @@ def main() -> None:
                 ramp_supported=True, continuous_phase=True,
                 max_frequency_hz=110_000.0, max_vpp=4.0,
             ),
+            # This backend is called only while Controller.stage ==
+            # "frequency". It keeps the original bitmaps for the learned
+            # experts and supplies fitted 1 px centrelines solely to the
+            # explicit ramp-frequency geometry cross-check.
+            frequency_backend=FrequencyStageBackend(cfg, output),
         )
         decision = controller.start(Target(args.mode, args.height_div), adapter.signal)
         while decision.status not in ("done", "failed", "stopped"):

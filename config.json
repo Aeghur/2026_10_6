@@ -11,6 +11,9 @@
   "manual_gain": 0,
   "strategy_target_exposure": 80,
   "strategy_exposure_candidates": [60, 80, 100, 140, 200, 260, 313],
+  "strategy_frequency_centerline_roi": [20, 88, 355, 307],
+  "strategy_centerline_coarse_samples": 8000,
+  "strategy_centerline_fine_samples": 10000,
   "min_trace_pixels": 500,
   "warp_size": 640,
   "full_grid_corners": [

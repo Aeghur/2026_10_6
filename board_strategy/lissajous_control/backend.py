@@ -32,7 +32,7 @@ class FrequencyBackend:
     def next_window(self):
         return self.observer.decide()['next_window_us']
 
-    def observe(self, window, images):
+    def observe(self, window, images, geometry_images=None):
         with torch.inference_mode():
-            self.observer.observe(window, images)
+            self.observer.observe(window, images, geometry_images)
             return self.observer.decide()

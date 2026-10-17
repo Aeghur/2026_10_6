@@ -223,6 +223,10 @@ Decision关键字段：
   control_time_limit_exceeded            10秒内没有建立目标
 
 frequency阶段每个窗口两张新帧，图像决定继续窗口还是转正弦。
+板级适配器可为FrequencyBackend额外提供两张geometry_images：原始校准图仍进入
+学习模型，geometry_images只进入fit_single_pair几何交叉验证。当前实机适配器在
+锯齿测频阶段用有限线宽拟合生成1px中心线；进入正弦相位、调幅和保持阶段后不调用
+该路线。未提供geometry_images时保持原行为，原图同时用于模型和几何验证。
 phase_first检查幅度后拍当前相位；phase_quarter要求实际输出+90度后再拍。
 静态图对相位存在歧义，两次有已知动作的观测用于消除它。
 若两帧超时或分支模型不符会拒绝，而不是把假设当观测。

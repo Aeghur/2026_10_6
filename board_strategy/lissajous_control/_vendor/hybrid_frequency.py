@@ -288,12 +288,19 @@ class HybridRecognizer:
         self.probability=np.full(len(config.frequencies),1/len(config.frequencies))
         self.scores=None
 
-    def observe(self,window_us,images):
+    def observe(self,window_us,images,geometry_images=None):
         if window_us not in self.config.windows or window_us in self.used:
             raise ValueError('Unknown or repeated window')
+        if geometry_images is None:
+            geometry_images=images
+        if len(images)!=2 or len(geometry_images)!=2:
+            raise ValueError('Frequency observation needs two model and two geometry images')
         j=self.config.windows.index(window_us)
         x,s=encode_pair(images)
-        self.fits[0,j]=fit_single_pair(images,window_us,self.config)
+        # The learned experts retain the calibrated camera bitmaps.  A board
+        # adapter may provide a separately extracted centreline only for the
+        # explicit geometric cross-check performed by fit_single_pair().
+        self.fits[0,j]=fit_single_pair(geometry_images,window_us,self.config)
         with torch.inference_mode():
             z=self.model.encode(torch.tensor(x[None,None],device=self.device).float()/255,
                 torch.tensor(s[None,None],device=self.device),self.meta[j:j+1])
