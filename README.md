@@ -25,9 +25,21 @@ not send a waveform command or change the DAC output.
 
 The real oscilloscope uses a white XY trace, so `trace_color` is `white` and
 `grid_corners` must describe the four analysis-region corners in the corrected
-1280x720 camera image. The real DAC currently has no zero-amplitude command; therefore
-`capture_background` is disabled and the bright white trace is thresholded
-directly.
+1280x720 camera image. The real DAC has no zero-amplitude command. With
+`capture_background` enabled, the solver captures six deliberately different
+traces and forms a low-percentile reference image. This removes the fixed
+graticule and reflections before trace geometry is measured.
+
+Validate trace separation and integer frequency-ratio lobe recognition against
+a known X-channel source before running the closed loop. This changes Y to 1x,
+2x and 3x the known frequency, saves every raw/warped/mask image, and finally
+leaves Y at the known frequency and 45 degrees:
+
+```bash
+.venv/bin/python diagnose_axes.py --known-x-hz 1000
+```
+
+The report is written below `artifacts/diagnostics/frequency_validation_*`.
 
 Generated diagnostics:
 

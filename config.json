@@ -58,7 +58,7 @@
   "trace_color": "white",
   "white_saturation_max": 80,
   "white_value_min": 175,
-  "capture_background": false,
+  "capture_background": true,
   "settle_seconds": 0.4,
   "amplitude_vpp": 2.0,
   "amplitude_level": 8,

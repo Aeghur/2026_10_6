@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate axis-intersection frequency ratios against a known X frequency."""
+"""Validate real-scope lobe recognition against a known X frequency."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ def main() -> None:
     camera = Camera(cfg)
     analyzer = Analyzer(cfg)
     signal = build_signal_client(cfg)
-    records: list[dict] = []
+    samples: list[tuple[int, float, float, float, object]] = []
     try:
         index = 0
         for multiplier in args.multipliers:
@@ -46,33 +46,30 @@ def main() -> None:
                 signal.set(probe_hz, phase)
                 time.sleep(max(0.8, float(cfg["settle_seconds"])))
                 frame = camera.frame()
-                warped = analyzer.warp(frame)
-                mask = analyzer.base_trace_mask(warped)
-                counts = analyzer.axis_intersections(frame)
-                record: dict = {
-                    "probe_y_hz": probe_hz,
-                    "phase_deg": phase,
-                    "expected_x_hz": args.known_x_hz,
-                    "expected_fx_over_fy": args.known_x_hz / probe_hz,
-                    "axis_intersections": counts,
-                    "passed": False,
-                }
-                if counts:
-                    observed_ratio = counts["y_axis"] / counts["x_axis"]
-                    estimated_x = probe_hz * observed_ratio
-                    error_percent = 100.0 * abs(estimated_x - args.known_x_hz) / args.known_x_hz
-                    record.update({
-                        "observed_fx_over_fy": observed_ratio,
-                        "estimated_x_hz": estimated_x,
-                        "error_percent": error_percent,
-                        "passed": error_percent <= 5.0,
-                    })
-                records.append(record)
                 stem = f"{index:02d}_{probe_hz:g}Hz_{phase:g}deg"
                 cv2.imwrite(str(output / f"{stem}_raw.jpg"), frame)
-                cv2.imwrite(str(output / f"{stem}_warped.jpg"), warped)
-                cv2.imwrite(str(output / f"{stem}_mask.png"), mask)
-                print(json.dumps(record, ensure_ascii=False), flush=True)
+                samples.append((index, multiplier, probe_hz, phase, frame))
+
+        analyzer.set_background_frames([sample[4] for sample in samples])
+        assert analyzer.background is not None
+        cv2.imwrite(str(output / "synthetic_background.jpg"), analyzer.background)
+
+        records: list[dict] = []
+        for index, multiplier, probe_hz, phase, frame in samples:
+            warped = analyzer.warp(frame)
+            mask = analyzer.base_trace_mask(warped)
+            record = {
+                "probe_y_hz": probe_hz,
+                "phase_deg": phase,
+                "expected_lobes": int(round(multiplier)),
+                "detected_lobes": analyzer.lobe_count(frame),
+                "axis_intersections": analyzer.axis_intersections(frame),
+            }
+            records.append(record)
+            stem = f"{index:02d}_{probe_hz:g}Hz_{phase:g}deg"
+            cv2.imwrite(str(output / f"{stem}_warped.jpg"), warped)
+            cv2.imwrite(str(output / f"{stem}_mask.png"), mask)
+            print(json.dumps(record, ensure_ascii=False), flush=True)
     finally:
         try:
             signal.set(args.known_x_hz, 45.0)
@@ -80,13 +77,28 @@ def main() -> None:
             signal.close()
             camera.close()
 
-    valid = [item for item in records if item["axis_intersections"] is not None]
+    groups = []
+    for multiplier in args.multipliers:
+        probe_hz = args.known_x_hz * multiplier
+        detected = [
+            item["detected_lobes"] for item in records
+            if abs(item["probe_y_hz"] - probe_hz) < 0.1
+        ]
+        expected = int(round(multiplier))
+        groups.append({
+            "probe_y_hz": probe_hz,
+            "expected_lobes": expected,
+            "detected_lobes_by_phase": detected,
+            # A clipped tangent can open a lobe at one phase; another phase
+            # normally closes it, so retain the strongest observation.
+            "detected_lobes": max(detected, default=0),
+            "passed": max(detected, default=0) == expected,
+        })
     report = {
         "known_x_hz": args.known_x_hz,
         "samples": len(records),
-        "valid_samples": len(valid),
-        "passed_samples": sum(bool(item["passed"]) for item in records),
-        "passed": bool(records) and all(bool(item["passed"]) for item in records),
+        "passed": bool(groups) and all(bool(item["passed"]) for item in groups),
+        "groups": groups,
         "records": records,
     }
     (output / "report.json").write_text(

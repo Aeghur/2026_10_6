@@ -137,6 +137,18 @@ class Analyzer:
     def set_background(self, frame: np.ndarray) -> None:
         self.background = self.warp(frame)
 
+    def set_background_frames(self, frames: list[np.ndarray]) -> None:
+        """Build a static-screen reference when the real DAC cannot be muted.
+
+        The trace moves between controlled captures while the graticule and
+        reflections remain fixed.  A low per-pixel percentile therefore keeps
+        the screen background and rejects the bright moving trace.
+        """
+        if len(frames) < 3:
+            raise ValueError("at least three frames are required for a synthetic background")
+        warped = np.stack([self.warp(frame) for frame in frames])
+        self.background = np.percentile(warped, 10, axis=0).astype(np.uint8)
+
     def base_trace_mask(self, warped: np.ndarray) -> np.ndarray:
         """Return the optical trace without deleting the two centre axes."""
         hsv = cv2.cvtColor(warped, cv2.COLOR_BGR2HSV)
@@ -183,6 +195,41 @@ class Analyzer:
                 continue
             clean[labels == label] = 255
         return clean
+
+    def lobe_geometry(self, frame: np.ndarray) -> dict:
+        """Count closed lobes and report whether they spread along X or Y."""
+        mask = self.base_trace_mask(self.warp(frame))
+        padded = cv2.copyMakeBorder(mask, 8, 8, 8, 8, cv2.BORDER_CONSTANT, value=0)
+        contours, hierarchy = cv2.findContours(
+            padded, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE
+        )
+        if hierarchy is None:
+            return {"count": 0, "orientation": None}
+        minimum_area = self.size * self.size * 0.001
+        holes = [
+            contour for index, contour in enumerate(contours)
+            if hierarchy[0, index, 3] >= 0
+            and cv2.contourArea(contour) >= minimum_area
+        ]
+        if len(holes) <= 1:
+            return {"count": len(holes), "orientation": "equal" if holes else None}
+        centers = []
+        for contour in holes:
+            moments = cv2.moments(contour)
+            centers.append((
+                moments["m10"] / moments["m00"],
+                moments["m01"] / moments["m00"],
+            ))
+        spread_x = float(np.ptp([center[0] for center in centers]))
+        spread_y = float(np.ptp([center[1] for center in centers]))
+        return {
+            "count": len(holes),
+            "orientation": "horizontal" if spread_x >= spread_y else "vertical",
+            "spread": [spread_x, spread_y],
+        }
+
+    def lobe_count(self, frame: np.ndarray) -> int:
+        return int(self.lobe_geometry(frame)["count"])
 
     def measure(self, frame: np.ndarray, debug_prefix: Path | None = None) -> Measurement:
         warped = self.warp(frame)
@@ -429,13 +476,34 @@ class Calibrator:
         if not bool(self.cfg.get("capture_background", True)):
             print("Background capture disabled; using optical trace threshold.", flush=True)
             return
-        if not self.signal.supports_zero_amplitude:
-            print("UART backend cannot mute the DAC; skipping background capture.", flush=True)
+        if self.signal.supports_zero_amplitude:
+            print("Capturing optical zero-amplitude background...", flush=True)
+            self.signal.set(self.cfg["frequency_min_hz"], 0, amplitude=0)
+            time.sleep(max(0.8, self.cfg["settle_seconds"] * 2))
+            self.analyzer.set_background(self.camera.frame())
             return
-        print("Capturing optical zero-amplitude background...", flush=True)
-        self.signal.set(self.cfg["frequency_min_hz"], 0, amplitude=0)
-        time.sleep(max(0.8, self.cfg["settle_seconds"] * 2))
-        self.analyzer.set_background(self.camera.frame())
+
+        print("Capturing moving-trace references for static-grid removal...", flush=True)
+        minimum = float(self.cfg["frequency_min_hz"])
+        maximum = float(self.cfg["frequency_max_hz"])
+        middle = math.sqrt(minimum * maximum)
+        frames: list[np.ndarray] = []
+        for frequency, phase in (
+            (minimum, 17.0), (minimum, 71.0),
+            (middle, 29.0), (middle, 83.0),
+            (maximum, 41.0), (maximum, 107.0),
+        ):
+            self.signal.set(frequency, phase)
+            time.sleep(max(0.8, float(self.cfg["settle_seconds"])))
+            frames.append(self.camera.frame())
+            self.measurements += 1
+        self.analyzer.set_background_frames(frames)
+        DIAGNOSTICS_DIR.mkdir(parents=True, exist_ok=True)
+        assert self.analyzer.background is not None
+        cv2.imwrite(
+            str(DIAGNOSTICS_DIR / "synthetic_background.jpg"),
+            self.analyzer.background,
+        )
 
     def evaluate(self, frequency: float, phase: float) -> Measurement:
         self.signal.set(frequency, phase)
@@ -453,6 +521,43 @@ class Calibrator:
     def best_phase(self, frequency: float, phases: list[float]) -> tuple[float, Measurement]:
         candidates = [(phase, self.evaluate(frequency, phase)) for phase in phases]
         return min(candidates, key=lambda item: item[1].score)
+
+    def estimate_frequency_from_lobes(self) -> float | None:
+        """Estimate X from closed-lobe count at a logarithmic-midpoint Y probe."""
+        minimum = float(self.cfg["frequency_min_hz"])
+        maximum = float(self.cfg["frequency_max_hz"])
+        probe = math.sqrt(minimum * maximum)
+        estimates: list[tuple[int, float, dict]] = []
+        for phase in (23.0, 67.0):
+            self.signal.set(probe, phase)
+            time.sleep(self.cfg["settle_seconds"])
+            frame = self.camera.frame()
+            geometry = self.analyzer.lobe_geometry(frame)
+            self.measurements += 1
+            lobes = int(geometry["count"])
+            orientation = geometry["orientation"]
+            if lobes == 1:
+                estimate = probe
+            elif lobes > 1 and orientation == "horizontal":
+                estimate = probe / lobes
+            elif lobes > 1 and orientation == "vertical":
+                estimate = probe * lobes
+            else:
+                print(f"LOBES probe={probe:.2f} phase={phase:.1f} invalid {geometry}", flush=True)
+                continue
+            estimate = float(np.clip(estimate, minimum, maximum))
+            estimates.append((lobes, estimate, geometry))
+            print(
+                f"LOBES probe={probe:.2f} phase={phase:.1f} geometry={geometry} "
+                f"estimate={estimate:.2f}Hz",
+                flush=True,
+            )
+        if not estimates:
+            return None
+        # Prefer the phase with the most closed lobes; tangency at the image
+        # boundary can open one or more lobes in the other observation.
+        estimates.sort(key=lambda item: item[0], reverse=True)
+        return estimates[0][1]
 
     def estimate_frequency_from_axis_intersections(self) -> float | None:
         """Jump toward fx from the measured crossing ratio; never scan a range."""
@@ -537,7 +642,9 @@ class Calibrator:
         self.capture_background()
         minimum, maximum = self.cfg["frequency_min_hz"], self.cfg["frequency_max_hz"]
         if resume_frequency is None:
-            ratio_frequency = self.estimate_frequency_from_axis_intersections()
+            ratio_frequency = self.estimate_frequency_from_lobes()
+            if ratio_frequency is None:
+                ratio_frequency = self.estimate_frequency_from_axis_intersections()
             if ratio_frequency is not None:
                 best_frequency = round(ratio_frequency)
                 best_phase, best_result = self.best_phase(best_frequency, [0, 45, 90, 135])
