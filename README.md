@@ -56,6 +56,17 @@ Use 6/8 amplitude so the complete ramp remains visible:
   --saw-frequency 1000 --amplitude 6 --samples 3
 ```
 
+Search an unknown frequency automatically:
+
+```bash
+.venv/bin/python sawtooth_frequency.py --auto --amplitude 6 --samples 3
+```
+
+The automatic route obtains a coarse estimate from sine-lobe geometry, then
+performs four shrinking sawtooth searches around it. If another source already
+provides a coarse estimate, skip the sine probe with
+`--initial-frequency 40000`.
+
 For a known reference, add `--known-x-hz 1000`; the report then includes the
 frequency error. Outputs are saved below
 `artifacts/diagnostics/sawtooth_*`. A successful digital ACK is not sufficient:
