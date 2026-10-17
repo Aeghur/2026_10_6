@@ -55,7 +55,7 @@ class FrequencyCenterlineTests(unittest.TestCase):
         self.assertIs(seen_model, model)
         self.assertIs(seen_geometry, geometry)
 
-    def test_stage_wrapper_marks_frequency_only_and_forwards_centrelines(self):
+    def test_stage_wrapper_feeds_centrelines_to_model_and_geometry(self):
         with tempfile.TemporaryDirectory() as directory:
             backend = FrequencyStageBackend.__new__(FrequencyStageBackend)
             backend.inner = FakeInner()
@@ -65,9 +65,14 @@ class FrequencyCenterlineTests(unittest.TestCase):
             original = [np.zeros((384, 384), np.uint8) for _ in range(2)]
             result = backend.observe(175.0, original)
             _, model, geometry = backend.inner.call
-            self.assertIs(model, original)
+            self.assertIsNot(model, original)
+            self.assertTrue(all(item.mode == "L" and item.size == (384, 384) for item in model))
+            self.assertTrue(all(np.count_nonzero(np.asarray(item)) for item in model))
             self.assertTrue(all(np.count_nonzero(item) for item in geometry))
+            for model_image, geometry_image in zip(model, geometry):
+                np.testing.assert_array_equal(np.asarray(model_image), geometry_image)
             self.assertEqual(result["centerline_scope"], "frequency_stage_only")
+            self.assertEqual(result["model_input"], "fitted_centerline")
             self.assertEqual(len(list(Path(directory).glob("*_centerline.png"))), 2)
 
     def test_sparse_ramp_is_smoothed_and_still_geometrically_valid(self):

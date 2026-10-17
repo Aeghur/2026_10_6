@@ -173,19 +173,20 @@ all values in `strategy_exposure_candidates`, and selects a usable fixed value
 closest to the model's `strategy_target_exposure` (80 = approximately 8 ms).
 Every candidate and `exposure_report.json` are saved below the run directory.
 
-The real-board adapter also enables a fitted-centreline geometry route, scoped
+The real-board adapter also enables a fitted-centreline recognition route, scoped
 strictly to the ramp **frequency** stage. For every two-frame frequency probe:
 
-1. the original calibrated 384x384 images continue to feed the learned
-   frequency experts;
-2. a finite-width sine fit produces a supersampled 1 px centreline;
-3. only that centreline feeds the explicit `fit_single_pair()` geometric
+1. a finite-width sine fit converts each calibrated 384x384 image into a
+   supersampled, smooth 1 px centreline;
+2. that centreline directly feeds the learned frequency experts;
+3. the same centreline feeds the explicit `fit_single_pair()` geometric
    cross-check.
 
 The controller does not call this backend during sine phase correction,
 amplitude adjustment, or the five-second hold. Each extraction is saved as
 `frequency_*_centerline.png` plus a JSON fit report in the run directory, and
-frequency telemetry includes `centerline_scope: frequency_stage_only`.
+frequency telemetry includes `centerline_scope: frequency_stage_only` and
+`model_input: fitted_centerline`.
 `strategy_frequency_centerline_roi` is expressed in the canonical 384x384
 canvas and must be reviewed if the camera/scope calibration or displayed ramp
 height changes. A rejected centreline becomes unavailable geometric evidence;

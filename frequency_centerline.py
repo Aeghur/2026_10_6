@@ -1,8 +1,8 @@
 """Board-only centreline extraction for the ramp frequency stage.
 
-Raw calibrated images still feed the learned frequency experts.  This module
-creates a separate one-pixel sine centreline solely for their geometric
-cross-check; it is never used by phase, amplitude, or hold verification.
+The finite-width fit is rendered as a smooth one-pixel sine centreline.  That
+centreline feeds both the learned frequency experts and their geometric
+cross-check; phase, amplitude, and hold verification never use this route.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from PIL import Image
 
 from lissajous_control.backend import FrequencyBackend
 from lissajous_control._vendor.pixel_vision import foreground
@@ -213,7 +214,7 @@ class FrequencyCenterlineExtractor:
 
 
 class FrequencyStageBackend:
-    """Use fitted centrelines only inside Controller's ramp-frequency backend."""
+    """Feed fitted centrelines to every ramp-frequency recognition input."""
     def __init__(self, cfg: dict, output: Path):
         self.inner = FrequencyBackend(threads=2)
         self.output = Path(output)
@@ -232,7 +233,7 @@ class FrequencyStageBackend:
 
     def observe(self, window, images):
         self.sequence += 1
-        geometry_images, reports = [], []
+        centreline_arrays, model_images, reports = [], [], []
         for index, image in enumerate(images, 1):
             try:
                 centreline, report = self.extractor.extract(
@@ -241,14 +242,18 @@ class FrequencyStageBackend:
             except (TypeError, ValueError) as error:
                 centreline = np.zeros((384, 384), np.uint8)
                 report = {"method": "rejected", "output_valid": False, "error": str(error)}
-            geometry_images.append(centreline)
+            centreline_arrays.append(centreline)
+            model_images.append(Image.fromarray(centreline, mode="L"))
             reports.append(report)
             stem = f"frequency_{self.sequence:02d}_{float(window):g}us_pair{index}"
             cv2.imwrite(str(self.output / f"{stem}_centerline.png"), centreline)
             (self.output / f"{stem}_centerline.json").write_text(
                 json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
             )
-        result = self.inner.observe(window, images, geometry_images=geometry_images)
+        result = self.inner.observe(
+            window, model_images, geometry_images=centreline_arrays
+        )
         result["centerline_geometry"] = reports
         result["centerline_scope"] = "frequency_stage_only"
+        result["model_input"] = "fitted_centerline"
         return result
