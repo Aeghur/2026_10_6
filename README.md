@@ -74,8 +74,10 @@ frequency error. Outputs are saved below
 `artifacts/diagnostics/sawtooth_*`. A successful digital ACK is not sufficient:
 the program returns an error unless a trace spanning the Y direction is also
 visible. A mismatched free-running sawtooth produces a dense lattice because
-successive sweeps start at different X phases; the program reports `unlocked`
-and does not emit a false frequency for that image.
+successive sweeps start at different X phases. Independent clocks can also
+retain a slow phase drift after the spatial search reaches the frequency. In
+that case the program reports `estimated` with `estimated_x_hz`, while
+`phase_locked` remains false.
 
 Generated diagnostics:
 

@@ -355,7 +355,19 @@ def automatic_search(
         temporal_records.append(record)
         print("TEMPORAL", json.dumps(record, ensure_ascii=False), flush=True)
     best_temporal = min(temporal_records, key=lambda item: float(item["score"]))
-    return float(best_temporal["frequency_hz"]), seed_observations, probes
+    if bool(best_temporal["locked"]):
+        chosen = best_temporal
+    else:
+        # Independent X and Y clocks can retain phase drift even when their
+        # displayed frequencies agree. Temporal stability may prove phase
+        # lock, but must not override the spatial search minimum.
+        final_stage = [item for item in probes if item.get("stage") == 4]
+        valid_final = [
+            item for item in final_stage
+            if float(item.get("score", 1_000_000.0)) < 1_000_000.0
+        ]
+        chosen = min(valid_final or ranked, key=lambda item: float(item["score"]))
+    return float(chosen["frequency_hz"]), seed_observations, probes
 
 
 def main() -> None:
@@ -409,8 +421,18 @@ def main() -> None:
 
     locked_samples = [item for item in results if item["locked"]]
     locked = len(locked_samples) > len(results) // 2
+    spatially_converged = False
+    if args.auto:
+        final_stage = [item for item in search_probes if item.get("stage") == 4]
+        spatially_converged = bool(final_stage) and min(
+            float(item.get("score", 1_000_000.0)) for item in final_stage
+        ) <= 30.0
     report = {
-        "status": "locked" if locked else ("unlocked" if results else "error"),
+        "status": (
+            "locked" if locked else
+            "estimated" if spatially_converged else
+            "unlocked" if results else "error"
+        ),
         "waveform": "sawtooth",
         "automatic_search": args.auto,
         "commanded_saw_hz": target_frequency,
@@ -425,20 +447,21 @@ def main() -> None:
     if results:
         cycles = float(np.median([item["cycles_per_sweep"] for item in results]))
         report["median_cycles_per_sweep"] = cycles
-    if locked:
-        # With a free-running sawtooth, a thin repeatable curve means every
-        # sweep starts at the same X phase. The fundamental lock is fx = fsaw.
+    if locked or spatially_converged:
+        # The spatial minimum estimates fx = fsaw. Multi-frame stability is a
+        # stronger, optional indication that their relative phase is fixed.
         report["estimated_x_hz"] = target_frequency
+        report["phase_locked"] = locked
     if args.known_x_hz is not None:
         report["known_x_hz"] = args.known_x_hz
-        if locked:
+        if locked or spatially_converged:
             report["frequency_error_hz"] = target_frequency - args.known_x_hz
     (output / "report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     print(json.dumps(report, ensure_ascii=False, indent=2))
     print(f"ARTIFACTS {output}")
-    if not locked:
+    if not (locked or spatially_converged):
         raise SystemExit(2)
 
 
