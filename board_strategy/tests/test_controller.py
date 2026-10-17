@@ -62,6 +62,16 @@ class GuardChecks(unittest.TestCase):
         self.assertEqual(r.reason,'frequency_unconfirmed_after_all_windows')
         self.assertFalse(r.success)
 
+    def test_instant_reset_probe_keeps_rise_window(self):
+        c=Controller('session', Capabilities(True,True),
+                     options=Options(ramp_reset_ratio=0), frequency_backend=StubFrequency())
+        r=c.start(now_s=0)
+        self.assertEqual(r.command.signal.rise_time_us,175.)
+        self.assertEqual(r.command.signal.reset_ratio,0.)
+        self.assertAlmostEqual(r.command.signal.frequency_hz,1e6/175.)
+        with self.assertRaises(ValueError):
+            Options(ramp_reset_ratio=-.01)
+
     def test_default_capabilities_reject_unimplemented_ramp(self):
         c=Controller('x')
         self.assertEqual(c.start(now_s=0).reason,'ramp_required_by_trained_model')

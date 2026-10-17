@@ -216,3 +216,10 @@ class WaveformController:
 `output_frequency_hz = detected_frequency_hz * 2`，再把最终输出频率传给
 `set_waveform()`。最终值不得超过210000 Hz；例如识别到105 kHz时传入210 kHz。
 自由模式不需要设置FPGA跟随模式的二倍频位，因为频率字已经是最终输出频率。
+
+## 当前实机锯齿定义更新
+
+按用户更新要求，锯齿应线性缓慢上升、到顶后立即回落，不再分配固定5%回扫时间。
+上位机以 `frequency_hz=1e6/T_us` 换算上升窗口，`reset_ratio=0`。
+现有串口包没有回扫比例字段，必须由FPGA实现瞬时回绕；上位机不能通过现有包
+单独设置回扫时间。实际回落仍受DAC采样和模拟带宽限制，需时域测量确认。

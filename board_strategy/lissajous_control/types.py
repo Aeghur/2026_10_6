@@ -23,8 +23,8 @@ class Signal:
         if not 0 < self.frequency_hz <= 1e7 or not 0 < self.vpp <= 20 or not 0 <= self.phase_deg < 360:
             raise ValueError('Signal values out of range; phase is 0 <= deg < 360')
         if self.waveform == 'ramp':
-            if not finite(self.rise_time_us) or self.rise_time_us <= 0 or self.reset_ratio <= 0:
-                raise ValueError('Ramp needs rise_time_us and positive reset_ratio')
+            if not finite(self.rise_time_us) or self.rise_time_us <= 0 or self.reset_ratio < 0:
+                raise ValueError('Ramp needs rise_time_us and nonnegative reset_ratio')
             expected = 1e6 / (self.rise_time_us * (1 + self.reset_ratio))
             if abs(self.frequency_hz / expected - 1) > .0005:
                 raise ValueError('Ramp frequency and rising duration disagree')
@@ -70,9 +70,13 @@ class Options:
     x_reference_div: float = 8.
     max_phase_probe_gap_s: float = .25
     max_trim_hz: float = 5.
+    ramp_reset_ratio: float = .05
 
     def __post_init__(self):
         values = asdict(self)
+        ratio = values.pop("ramp_reset_ratio")
+        if not finite(ratio) or ratio < 0:
+            raise ValueError("ramp_reset_ratio must be finite and nonnegative")
         if self.control_limit_s is None:
             values.pop("control_limit_s")
         if not finite(*values.values()) or min(values.values()) <= 0:

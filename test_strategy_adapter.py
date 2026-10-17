@@ -31,7 +31,7 @@ class StrategyAdapterTests(unittest.TestCase):
 
     def test_ramp_maps_to_sawtooth_and_nominal_amplitude_code(self):
         adapter = self.adapter()
-        requested = Signal("ramp", 1e6 / (175 * 1.05), 4.0, 0.0, 175.0, 0.05)
+        requested = Signal("ramp", 1e6 / 175, 4.0, 0.0, 175.0, 0.0)
         adapter.apply(requested)
         waveform, frequency, lag, amplitude = adapter.link.calls[0]
         self.assertEqual(waveform, "sawtooth")

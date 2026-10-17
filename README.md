@@ -205,3 +205,16 @@ frequency; those cases require a firmware/protocol extension rather than a
 fabricated acknowledgement. Raw frames, the corrected graticule, 384x384 model
 inputs, exposure trials, decisions and the final result are saved under
 `artifacts/diagnostics/strategy_*`.
+
+## Instant-reset hardware integration
+
+The real-board adapter now requests a linear rising sawtooth with no allocated
+return interval (`ramp_reset_ratio=0`). For rise time T_us, it commands
+frequency_hz=1e6/T_us; the 175 us startup probe is 5714.286 Hz.
+This is the user's updated hardware requirement, replacing the board adapter's
+previous fixed 5% return interval. The collaborator SDK default and training
+assets retain their original 5% definition; recognition under the changed
+physical waveform needs fresh hardware validation.
+The UART packet contains no reset-ratio field, so FPGA firmware must implement
+the instant wrap. This repository only changes the commanded frequency and
+signal metadata; an ACK does not prove the physical return duration.

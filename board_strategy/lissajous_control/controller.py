@@ -83,7 +83,7 @@ class Controller:
             return self._fail('ramp_required_by_trained_model')
         if not self.caps.continuous_phase:
             return self._fail('continuous_phase_required_for_quadrature_probe')
-        if self.caps.max_vpp < 4 or self.caps.max_frequency_hz < 1e6/(73*1.05):
+        if self.caps.max_vpp < 4 or self.caps.max_frequency_hz < 1e6/(73*(1+self.options.ramp_reset_ratio)):
             return self._fail('insufficient_probe_output_range')
         if self.backend is None:
             from .backend import FrequencyBackend
@@ -93,7 +93,8 @@ class Controller:
 
     def _ramp(self, window):
         self.pair = []
-        return self._issue(Signal('ramp', 1e6/(window*1.05), 4., 0., window, .05),
+        ratio = self.options.ramp_reset_ratio
+        return self._issue(Signal('ramp', 1e6/(window*(1+ratio)), 4., 0., window, ratio),
                            'measure_unknown_frequency', 'frequency')
 
     def applied(self, command_id, actual_signal, applied_at_s=None):

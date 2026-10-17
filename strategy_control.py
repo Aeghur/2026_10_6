@@ -211,7 +211,7 @@ def main() -> None:
     timings = []
     try:
         if not args.skip_exposure_test:
-            probe = Signal("ramp", 1e6 / (175.0 * 1.05), 4.0, 0.0, 175.0, 0.05)
+            probe = Signal("ramp", 1e6 / 175.0, 4.0, 0.0, 175.0, 0.0)
             adapter.apply(probe)
             exposure = adapter.select_exposure(
                 list(map(int, cfg.get("strategy_exposure_candidates", [60, 80, 100, 140, 200, 260, 313]))),
@@ -224,7 +224,8 @@ def main() -> None:
 
         controller = Controller(
             calibration_id=f"fixed-camera-{stamp}",
-            options=Options(control_limit_s=None if args.no_control_time_limit else 10.0),
+            options=Options(control_limit_s=None if args.no_control_time_limit else 10.0,
+                            ramp_reset_ratio=0.0),
             capabilities=Capabilities(
                 ramp_supported=True, continuous_phase=True,
                 max_frequency_hz=210_000.0, max_vpp=4.0,
@@ -264,7 +265,7 @@ def main() -> None:
         decisions.append(decision.to_dict())
         (output / "timings.json").write_text(json.dumps(timings, indent=2))
         result = decision.to_dict()
-        result["run_settings"] = {"control_limit_s": controller.options.control_limit_s, "exposure_absolute": adapter.camera.current_exposure}
+        result["run_settings"] = {"control_limit_s": controller.options.control_limit_s, "exposure_absolute": adapter.camera.current_exposure, "ramp_reset_ratio": controller.options.ramp_reset_ratio}
         (output / "result.json").write_text(
             json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
         )
