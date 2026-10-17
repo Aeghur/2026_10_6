@@ -9,6 +9,8 @@
   "lens_calibration": "artifacts/calibration/lens/lens_calibration.json",
   "manual_exposure": 313,
   "manual_gain": 0,
+  "strategy_target_exposure": 80,
+  "strategy_exposure_candidates": [60, 80, 100, 140, 200, 260, 313],
   "min_trace_pixels": 500,
   "warp_size": 640,
   "full_grid_corners": [

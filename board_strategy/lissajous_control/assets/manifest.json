@@ -1,0 +1,47 @@
+{
+  "format": "lissajous-board-frequency-1",
+  "sha256": "9289d37e7fc9a1cadbff02e207e28b28b3958ca682ef20e3650e91624a867bf4",
+  "source_checkpoint_name": "best.pt",
+  "source_sha256": "b7e9d3dbe86683e49209131cab50da9a22f9bceff80791d29f74cc50de626323",
+  "source_epoch": 13,
+  "source_updates": 12883,
+  "frequency_grid_hz": [
+    1000,
+    100000,
+    100
+  ],
+  "windows_us": [
+    73.0,
+    110.0,
+    175.0,
+    223.0,
+    809.0,
+    1750.0,
+    3500.0
+  ],
+  "canvas_pixels": [
+    384,
+    384
+  ],
+  "canvas_div": [
+    -5,
+    -5,
+    5,
+    5
+  ],
+  "ramp_reset_to_rise_ratio": 0.05,
+  "training_exposure_ms": 8,
+  "training_persistence_ms": 2,
+  "learned_scope": "frequency_only",
+  "hardware_validation": "not_performed",
+  "inference_source_hashes": {
+    "hybrid_frequency": "1ba585689bce08e5fe5fc167ca15bf498dd336401b6865f73db303631978d5fb",
+    "multisweep_model": "0c1db796584e2ffba1094a89a31f74097467b8fb516a9d5ff7afc3066f0444d3",
+    "overlap_model": "90d54aa15f0d310aa6a3aade16aa2ca1de3a71b1fb11b249cebed2af102aebe4",
+    "sweep_optics": "a442326ce4cc71522f5669c0cb3b8504948c711715d23986ffcec6f083b25069",
+    "active_optics": "361059ac02502ec9ed7b6589b56cbed6f71475121ef8505e33b112e6fd095a47",
+    "sweep_vision": "74f833cb83e328229554770e9ec05121c4884e68d2dd2ae997fff5527923ff48",
+    "pixel_vision": "ff95d8a20e511a83183e81d9f5ca2d95061102085df7a3cb1dca3f3860a58736",
+    "phase_probe": "c79e5fad27888737ddd407c05e2e46e7aa7bfea2fd7f0366c379543e8424f7cf"
+  }
+}

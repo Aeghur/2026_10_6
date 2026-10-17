@@ -79,17 +79,9 @@ class LensCorrector:
 class Camera:
     def __init__(self, cfg: dict) -> None:
         self.cfg = cfg
-        subprocess.run(
-            [
-                "v4l2-ctl", "-d", cfg["camera_device"],
-                "--set-ctrl="
-                f"auto_exposure=1,exposure_time_absolute={cfg.get('manual_exposure', 313)},"
-                f"gain={cfg.get('manual_gain', 0)},white_balance_automatic=0,"
-                "white_balance_temperature=4000",
-            ],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+        self.set_exposure(
+            int(cfg.get("manual_exposure", 313)),
+            int(cfg.get("manual_gain", 0)),
         )
         self.cap = cv2.VideoCapture(cfg["camera_device"], cv2.CAP_V4L2)
         self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
@@ -102,15 +94,49 @@ class Camera:
         for _ in range(8):
             self.cap.read()
 
+    def set_exposure(self, exposure: int, gain: int | None = None) -> None:
+        """Select a fixed V4L2 exposure; auto_exposure=1 is manual mode."""
+        controls = [
+            "auto_exposure=1",
+            f"exposure_time_absolute={int(exposure)}",
+        ]
+        if gain is not None:
+            controls.append(f"gain={int(gain)}")
+        controls.extend([
+            "white_balance_automatic=0",
+            "white_balance_temperature=4000",
+        ])
+        subprocess.run(
+            [
+                "v4l2-ctl", "-d", self.cfg["camera_device"],
+                "--set-ctrl=" + ",".join(controls),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        self.current_exposure = int(exposure)
+
     def frame(self) -> np.ndarray:
+        image, _ = self.frame_timed()
+        return image
+
+    def frame_timed(self) -> tuple[np.ndarray, float]:
+        """Return a fresh frame and an estimated exposure midpoint."""
         # Flush buffered frames so every observation follows the latest command.
-        image = None
-        for _ in range(5):
-            ok, image = self.cap.read()
+        for _ in range(4):
+            ok, _ = self.cap.read()
             if not ok:
                 raise RuntimeError("camera frame read failed")
-        assert image is not None
-        return image
+        ok, image = self.cap.read()
+        finished = time.monotonic()
+        if not ok:
+            raise RuntimeError("camera frame read failed")
+        # UVC exposure_time_absolute is expressed in 100 us units. OpenCV does
+        # not expose the kernel buffer timestamp, so this is the closest
+        # available midpoint after explicitly draining old frames.
+        captured_at = finished - self.current_exposure * 0.00005
+        return image, captured_at
 
     def close(self) -> None:
         self.cap.release()

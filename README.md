@@ -159,3 +159,36 @@ are no longer valid.
 - `artifacts/diagnostics/`: current masks and axis-intersection diagnostics
 - `artifacts/results/`: final solver images and machine-readable result
 - `artifacts/legacy/`: retained images produced by the earlier simulator flow
+
+## Collaborator frequency and phase strategy
+
+The imported `board_strategy/` package comes from the collaborator branch
+`huasomebody-strategy-main`. Its controller does not open the camera or UART.
+`strategy_control.py` adapts it to this project's fixed camera calibration and
+MSPM0 waveform protocol.
+
+The camera runs in V4L2 manual exposure mode (`auto_exposure=1`). Before the
+controller starts, the adapter outputs the standard 175 us ramp probe, captures
+all values in `strategy_exposure_candidates`, and selects a usable fixed value
+closest to the model's `strategy_target_exposure` (80 = approximately 8 ms).
+Every candidate and `exposure_report.json` are saved below the run directory.
+
+Run one target with:
+
+```bash
+.venv/bin/python strategy_control.py --mode circle --height-div 8
+```
+
+To review exposure candidates before allowing frequency/phase control, run:
+
+```bash
+.venv/bin/python strategy_control.py --exposure-test-only
+```
+
+Other modes are `diagonal` and `infinity`. The current UART protocol supports
+1/2/3/4 Vpp nominal steps and at most 110 kHz. The adapter stops with a clear
+error if the controller requests an intermediate amplitude or a higher
+frequency; those cases require a firmware/protocol extension rather than a
+fabricated acknowledgement. Raw frames, the corrected graticule, 384x384 model
+inputs, exposure trials, decisions and the final result are saved under
+`artifacts/diagnostics/strategy_*`.
