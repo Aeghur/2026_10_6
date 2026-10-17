@@ -129,6 +129,69 @@ class SawtoothAnalyzer:
         )
         return result, {"warped": warped, "mask": mask, "centerline": overlay}
 
+    def estimate_harmonic_cycles(self, frame: np.ndarray) -> dict:
+        """Estimate many X cycles from the spacing of horizontal extrema bands."""
+        mask = self.mask(self.warp(frame))
+        x0, x1 = int(self.width * 0.20), int(self.width * 0.80)
+        projection = np.mean(mask[:, x0:x1] > 0, axis=1)
+        smooth = np.convolve(projection, np.ones(9) / 9.0, mode="same")
+        threshold = max(0.18, float(np.percentile(smooth, 70)))
+        peaks: list[int] = []
+        for y in range(5, self.height - 5):
+            if smooth[y] < threshold or smooth[y] < np.max(smooth[y - 5:y + 6]):
+                continue
+            if not peaks or y - peaks[-1] > 12:
+                peaks.append(y)
+            elif smooth[y] > smooth[peaks[-1]]:
+                peaks[-1] = y
+        if len(peaks) < 6:
+            raise RuntimeError("高频亮带数量不足")
+        spacings = np.diff(np.asarray(peaks, dtype=float))
+        median_spacing = float(np.median(spacings))
+        good = spacings[
+            (spacings >= median_spacing * 0.70)
+            & (spacings <= median_spacing * 1.30)
+        ]
+        if len(good) < 4:
+            raise RuntimeError("高频亮带间距不稳定")
+        half_period_px = float(np.median(good))
+        sweep_height_px = float(self.cfg.get("sawtooth_sweep_height_px", 467.0))
+        cycles = sweep_height_px / (2.0 * half_period_px)
+        return {
+            "cycles_per_sweep": cycles,
+            "extrema_count": len(peaks),
+            "half_period_px": half_period_px,
+            "sweep_height_px": sweep_height_px,
+        }
+
+
+def estimate_sawtooth_seed(
+    cfg: dict, camera: Camera, link: MSPM0WaveLink,
+    analyzer: SawtoothAnalyzer, amplitude: int, output: Path,
+) -> tuple[float | None, list[dict]]:
+    """Use two low sawtooth frequencies to estimate a high unknown X input."""
+    minimum = float(cfg["frequency_min_hz"])
+    maximum = float(cfg["frequency_max_hz"])
+    observations: list[dict] = []
+    estimates: list[float] = []
+    for index, saw_hz in enumerate((minimum, min(maximum, minimum * 1.2)), 1):
+        link.set_sawtooth(saw_hz, 0.0, amplitude)
+        time.sleep(max(0.5, float(cfg.get("settle_seconds", 0.4))))
+        frame = camera.frame()
+        cv2.imwrite(str(output / f"seed_saw_{index}_{saw_hz:.3f}Hz.jpg"), frame)
+        try:
+            result = analyzer.estimate_harmonic_cycles(frame)
+            estimate = float(saw_hz * result["cycles_per_sweep"])
+            result.update({"saw_hz": saw_hz, "estimate_hz": estimate})
+            observations.append(result)
+            if result["cycles_per_sweep"] >= 2.0:
+                estimates.append(estimate)
+        except RuntimeError as error:
+            observations.append({"saw_hz": saw_hz, "error": str(error)})
+    if not estimates:
+        return None, observations
+    return float(np.clip(np.median(estimates), minimum, maximum)), observations
+
 
 def estimate_sine_seed(
     cfg: dict, camera: Camera, link: MSPM0WaveLink
@@ -191,18 +254,24 @@ def automatic_search(
     amplitude: int, output: Path,
 ) -> tuple[float, list[dict], list[dict]]:
     if initial_frequency is None:
-        seed, seed_observations = estimate_sine_seed(cfg, camera, link)
+        seed, seed_observations = estimate_sawtooth_seed(
+            cfg, camera, link, analyzer, amplitude, output
+        )
+        if seed is None:
+            seed, sine_observations = estimate_sine_seed(cfg, camera, link)
+            seed_observations.extend(sine_observations)
     else:
         seed = initial_frequency
         seed_observations = []
     minimum = float(cfg["frequency_min_hz"])
     maximum = float(cfg["frequency_max_hz"])
     center = float(np.clip(seed, minimum, maximum))
-    span = max(100.0, center * 0.20)
+    span = max(100.0, center * (0.03 if initial_frequency is None else 0.20))
     probes: list[dict] = []
     probe_index = 0
     for stage in range(4):
-        frequencies = np.linspace(center - span, center + span, 9)
+        points = 25 if stage == 0 and initial_frequency is None else 9
+        frequencies = np.linspace(center - span, center + span, points)
         stage_results = []
         for frequency in frequencies:
             frequency = float(np.clip(frequency, minimum, maximum))

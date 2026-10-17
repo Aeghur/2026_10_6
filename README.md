@@ -62,8 +62,10 @@ Search an unknown frequency automatically:
 .venv/bin/python sawtooth_frequency.py --auto --amplitude 6 --samples 3
 ```
 
-The automatic route obtains a coarse estimate from sine-lobe geometry, then
-performs four shrinking sawtooth searches around it. If another source already
+The automatic route first estimates high input frequencies from the spacing
+of horizontal extrema bands produced by low-frequency sawtooth sweeps. It
+falls back to sine-lobe geometry when too few bands are visible, then performs
+four shrinking sawtooth searches around the estimate. If another source already
 provides a coarse estimate, skip the sine probe with
 `--initial-frequency 40000`.
 
