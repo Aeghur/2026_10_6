@@ -1,0 +1,87 @@
+{
+  "model": "opencv_pinhole_k3_fixed",
+  "image_size": [
+    1280,
+    720
+  ],
+  "checkerboard_inner_corners": [
+    10,
+    7
+  ],
+  "square_size": 1.0,
+  "camera_matrix": [
+    [
+      1528.2620861414669,
+      0.0,
+      620.965946683611
+    ],
+    [
+      0.0,
+      1529.4184743620283,
+      360.86829099662674
+    ],
+    [
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "distortion_coefficients": [
+    -0.3894163227822344,
+    0.11367244745404374,
+    -0.0012235013523841111,
+    0.0016813389523624759,
+    0.0
+  ],
+  "rms_reprojection_error_px": 0.5045717031615508,
+  "mean_view_error_px": 0.48242439031600953,
+  "max_view_error_px": 0.7134914994239807,
+  "views": [
+    {
+      "path": "artifacts/calibration/lens/images/lens_01_20261017_072119_039410.jpg",
+      "error_px": 0.3326813876628876
+    },
+    {
+      "path": "artifacts/calibration/lens/images/lens_pose_01_20261017_072917_113193.jpg",
+      "error_px": 0.3105928897857666
+    },
+    {
+      "path": "artifacts/calibration/lens/images/lens_pose_02_20261017_072941_517077.jpg",
+      "error_px": 0.45862653851509094
+    },
+    {
+      "path": "artifacts/calibration/lens/images/lens_pose_03_20261017_073004_997026.jpg",
+      "error_px": 0.36948177218437195
+    },
+    {
+      "path": "artifacts/calibration/lens/images/lens_pose_04_20261017_073040_840033.jpg",
+      "error_px": 0.31642454862594604
+    },
+    {
+      "path": "artifacts/calibration/lens/images/lens_pose_06_20261017_073558_542946.jpg",
+      "error_px": 0.6052989363670349
+    },
+    {
+      "path": "artifacts/calibration/lens/images/lens_pose_07_20261017_073636_640128.jpg",
+      "error_px": 0.6111115217208862
+    },
+    {
+      "path": "artifacts/calibration/lens/images/lens_pose_08_20261017_073651_946744.jpg",
+      "error_px": 0.6771211624145508
+    },
+    {
+      "path": "artifacts/calibration/lens/images/lens_pose_09_20261017_073728_951428.jpg",
+      "error_px": 0.42941364645957947
+    },
+    {
+      "path": "artifacts/calibration/lens/images/lens_pose_10_20261017_073755_156706.jpg",
+      "error_px": 0.7134914994239807
+    }
+  ],
+  "rejected_views": [
+    "artifacts/calibration/lens/images/lens_pose_05_20261017_073534_946594.jpg",
+    "artifacts/calibration/lens/images/lens_pose_11_20261017_073839_640304.jpg",
+    "artifacts/calibration/lens/images/lens_pose_12_20261017_073901_983069.jpg",
+    "artifacts/calibration/lens/images/lens_pose_13_20261017_073935_298280.jpg"
+  ]
+}

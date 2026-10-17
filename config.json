@@ -1,0 +1,67 @@
+{
+  "camera_device": "/dev/video0",
+  "control_backend": "uart",
+  "serial_port": "/dev/ttyS4",
+  "signal_url": "http://192.168.137.1:8765/api/y",
+  "frame_width": 1280,
+  "frame_height": 720,
+  "fps": 30,
+  "lens_calibration": "artifacts/calibration/lens/lens_calibration.json",
+  "manual_exposure": 313,
+  "manual_gain": 0,
+  "min_trace_pixels": 500,
+  "warp_size": 640,
+  "full_grid_corners": [
+    [
+      168.0,
+      35.0
+    ],
+    [
+      1162.0,
+      29.0
+    ],
+    [
+      1177.0,
+      690.0
+    ],
+    [
+      181.0,
+      705.0
+    ]
+  ],
+  "grid_dimensions_div": [
+    12,
+    8
+  ],
+  "analysis_region_div": [
+    8,
+    8
+  ],
+  "grid_corners": [
+    [
+      333.67,
+      34.0
+    ],
+    [
+      996.33,
+      30.0
+    ],
+    [
+      1011.0,
+      692.5
+    ],
+    [
+      347.0,
+      702.5
+    ]
+  ],
+  "trace_color": "white",
+  "white_saturation_max": 80,
+  "white_value_min": 175,
+  "capture_background": false,
+  "settle_seconds": 0.4,
+  "amplitude_vpp": 2.0,
+  "amplitude_level": 8,
+  "frequency_min_hz": 1000,
+  "frequency_max_hz": 100000
+}
