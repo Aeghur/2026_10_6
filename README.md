@@ -41,6 +41,29 @@ leaves Y at the known frequency and 45 degrees:
 
 The report is written below `artifacts/diagnostics/frequency_validation_*`.
 
+## Sawtooth Y-axis timebase
+
+`sawtooth_frequency.py` is an independent frequency-measurement route. It
+commands a free-running Y sawtooth, rectifies the complete 12x8 graticule,
+removes the thin flyback by selecting the main trace component, and tests
+whether repeated sweeps form one thin, single-valued sideways curve. At the
+fundamental lock, X frequency equals the commanded sawtooth frequency.
+
+Use 6/8 amplitude so the complete ramp remains visible:
+
+```bash
+.venv/bin/python sawtooth_frequency.py \
+  --saw-frequency 1000 --amplitude 6 --samples 3
+```
+
+For a known reference, add `--known-x-hz 1000`; the report then includes the
+frequency error. Outputs are saved below
+`artifacts/diagnostics/sawtooth_*`. A successful digital ACK is not sufficient:
+the program returns an error unless a trace spanning the Y direction is also
+visible. A mismatched free-running sawtooth produces a dense lattice because
+successive sweeps start at different X phases; the program reports `unlocked`
+and does not emit a false frequency for that image.
+
 Generated diagnostics:
 
 - `artifacts/diagnostics/current.jpg`, `current_mask.png`: current rectified grid and trace

@@ -12,6 +12,7 @@ from protocol import (
     FrameDecoder,
     TYPE_ERROR,
     TYPE_PC_SET_TARGET,
+    TYPE_PC_SET_WAVEFORM,
     TYPE_PC_TARGET_ACK,
     TargetAck,
     decode_error,
@@ -21,6 +22,7 @@ from protocol import (
 
 BAUD = 1_000_000
 AMPLITUDE_CODES = {8: 0, 2: 1, 4: 2, 6: 3}
+WAVEFORM_CODES = {"sine": 0, "sawtooth": 1}
 ERROR_TEXT = {
     1: "FPGA确认超时",
     2: "FPGA确认帧格式或序号错误",
@@ -62,6 +64,18 @@ def encode_target_payload(
     return struct.pack(
         "<IHB", frequency_millihz, phase_centidegrees,
         AMPLITUDE_CODES[amplitude]
+    )
+
+
+def encode_waveform_payload(
+    waveform: str, frequency_hz: float, phase_degrees: float, amplitude: int
+) -> bytes:
+    """Build the unified SET_WAVEFORM payload defined by protocol 0x14."""
+    normalized = waveform.lower()
+    if normalized not in WAVEFORM_CODES:
+        raise ValueError("waveform必须是sine或sawtooth")
+    return bytes([WAVEFORM_CODES[normalized]]) + encode_target_payload(
+        frequency_hz, phase_degrees, amplitude
     )
 
 
@@ -113,6 +127,44 @@ class MSPM0WaveLink:
         payload = encode_target_payload(
             frequency_hz, phase_degrees, amplitude
         )
+        return self._exchange_target(
+            TYPE_PC_SET_TARGET, payload, expected_waveform="sine"
+        )
+
+    def set_waveform(
+        self, waveform: str, frequency_hz: float,
+        phase_degrees: float = 0.0, amplitude: int = 8,
+    ) -> TargetAck:
+        """Select sine/sawtooth and wait until FPGA has applied the command."""
+        normalized = waveform.lower()
+        payload = encode_waveform_payload(
+            normalized, frequency_hz, phase_degrees, amplitude
+        )
+        ack = self._exchange_target(
+            TYPE_PC_SET_WAVEFORM, payload, expected_waveform=normalized
+        )
+        expected_frequency = int(round(frequency_hz * 1000.0))
+        expected_phase = int(round(phase_degrees * 100.0))
+        expected_amplitude = AMPLITUDE_CODES[amplitude]
+        if (
+            ack.frequency_millihz != expected_frequency
+            or ack.phase_centidegrees != expected_phase
+            or ack.amplitude_code != expected_amplitude
+        ):
+            raise MSPM0LinkError("MSPM0确认参数与请求不一致")
+        return ack
+
+    def set_sawtooth(
+        self, frequency_hz: float, phase_degrees: float = 0.0,
+        amplitude: int = 8,
+    ) -> TargetAck:
+        return self.set_waveform(
+            "sawtooth", frequency_hz, phase_degrees, amplitude
+        )
+
+    def _exchange_target(
+        self, frame_type: int, payload: bytes, *, expected_waveform: str
+    ) -> TargetAck:
         with self._lock:
             if self._serial is None:
                 self.open()
@@ -120,7 +172,7 @@ class MSPM0WaveLink:
             sequence = self._sequence
             decoder = FrameDecoder()
             self._serial.write(
-                encode_frame(TYPE_PC_SET_TARGET, sequence, payload)
+                encode_frame(frame_type, sequence, payload)
             )
             self._serial.flush()
             deadline = time.monotonic() + self.timeout
@@ -133,10 +185,17 @@ class MSPM0WaveLink:
                         raise MSPM0CommandError(decode_error(frame.payload))
                     if frame.frame_type == TYPE_PC_TARGET_ACK:
                         ack = decode_target_ack(frame.payload)
+                        if not (ack.mode & 0x01):
+                            raise MSPM0LinkError(
+                                "MSPM0确认帧未标记DDS已启用"
+                            )
                         if not (ack.mode & 0x10):
                             raise MSPM0LinkError(
                                 "MSPM0确认帧未标记为自由运行模式"
                             )
+                        sawtooth_ack = bool(ack.mode & 0x20)
+                        if sawtooth_ack != (expected_waveform == "sawtooth"):
+                            raise MSPM0LinkError("MSPM0确认波形与请求不一致")
                         return ack
             raise MSPM0TimeoutError(
                 f"等待MSPM0/FPGA端到端确认超时（{self.port}）"
