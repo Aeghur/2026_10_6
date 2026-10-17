@@ -63,7 +63,7 @@ class Options:
     frame_max_age_s: float = .3
     max_hold_gap_s: float = .2
     hold_seconds: float = 5.
-    control_limit_s: float = 10.
+    control_limit_s: float | None = 10.
     amplitude_tolerance_div: float = .2
     shape_tolerance_div: float = .2  # Engineering threshold, not an exam-specified static metric.
     drift_limit_div: float = 1.
@@ -73,6 +73,8 @@ class Options:
 
     def __post_init__(self):
         values = asdict(self)
+        if self.control_limit_s is None:
+            values.pop("control_limit_s")
         if not finite(*values.values()) or min(values.values()) <= 0:
             raise ValueError('Options must be finite and positive')
         if self.hold_seconds < 5 or self.amplitude_tolerance_div > .2 or self.drift_limit_div > 1:

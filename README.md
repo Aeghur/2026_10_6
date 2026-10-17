@@ -173,24 +173,12 @@ all values in `strategy_exposure_candidates`, and selects a usable fixed value
 closest to the model's `strategy_target_exposure` (80 = approximately 8 ms).
 Every candidate and `exposure_report.json` are saved below the run directory.
 
-The real-board adapter also enables a fitted-centreline recognition route, scoped
-strictly to the ramp **frequency** stage. For every two-frame frequency probe:
-
-1. a finite-width sine fit converts each calibrated 384x384 image into a
-   supersampled, smooth 1 px centreline;
-2. that centreline directly feeds the learned frequency experts;
-3. the same centreline feeds the explicit `fit_single_pair()` geometric
-   cross-check.
-
-The controller does not call this backend during sine phase correction,
-amplitude adjustment, or the five-second hold. Each extraction is saved as
-`frequency_*_centerline.png` plus a JSON fit report in the run directory, and
-frequency telemetry includes `centerline_scope: frequency_stage_only` and
-`model_input: fitted_centerline`.
-`strategy_frequency_centerline_roi` is expressed in the canonical 384x384
-canvas and must be reviewed if the camera/scope calibration or displayed ramp
-height changes. A rejected centreline becomes unavailable geometric evidence;
-the adapter does not substitute a fabricated curve.
+The real-board adapter follows the collaborator integration example and uses
+Controller's default FrequencyBackend. Calibrated, cleaned 384x384 frames cover
+10x10 div; the visible 8-div vertical region is padded with black, not stretched.
+The same observed images feed the model and its original geometric cross-check.
+The additional fitted-centreline route in frequency_centerline.py is bypassed.
+Each actual model input is saved as frame_*_384.png in the run directory.
 
 Run one target with:
 
@@ -204,9 +192,15 @@ To review exposure candidates before allowing frequency/phase control, run:
 .venv/bin/python strategy_control.py --exposure-test-only
 ```
 
+For diagnostic runs, add `--no-control-time-limit` to disable the control
+deadline. This does not change confirmation or five-second hold requirements;
+the controller still fails if all seven frequency windows are exhausted without
+confirmation. `timings.json` records model startup, UART acknowledgement,
+capture/preprocessing/saving, and controller-step durations.
+
 Other modes are `diagonal` and `infinity`. The current UART protocol supports
-1/2/3/4 Vpp nominal steps and at most 110 kHz. The adapter stops with a clear
-error if the controller requests an intermediate amplitude or a higher
+1/2/3/4 Vpp nominal steps and 250 Hz–210 kHz. The adapter stops with a clear
+error if the controller requests an intermediate amplitude or an out-of-range
 frequency; those cases require a firmware/protocol extension rather than a
 fabricated acknowledgement. Raw frames, the corrected graticule, 384x384 model
 inputs, exposure trials, decisions and the final result are saved under

@@ -51,6 +51,17 @@ class GuardChecks(unittest.TestCase):
         c.applied(c.command.command_id,c.command.signal,.13)
         return c
 
+    def test_no_control_deadline_keeps_frequency_guards(self):
+        c=Controller('session', Capabilities(True,True),
+                     options=Options(control_limit_s=None), frequency_backend=StubFrequency(False))
+        c.start(now_s=0)
+        c.applied(c.command.command_id,c.command.signal,0)
+        r=c.step(Frame(trace(),c.current,c.command.command_id,1,20.,'session'),now_s=20.)
+        self.assertEqual(r.status,'capture')
+        r=c.step(Frame(trace(),c.current,c.command.command_id,2,20.05,'session'),now_s=20.05)
+        self.assertEqual(r.reason,'frequency_unconfirmed_after_all_windows')
+        self.assertFalse(r.success)
+
     def test_default_capabilities_reject_unimplemented_ramp(self):
         c=Controller('x')
         self.assertEqual(c.start(now_s=0).reason,'ramp_required_by_trained_model')

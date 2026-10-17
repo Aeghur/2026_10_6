@@ -25,7 +25,7 @@ from msp_wave_link import (
 with MSPM0WaveLink("/dev/ttyS4", timeout=1.0) as waveform:
     ack = waveform.set_waveform(
         waveform="sawtooth",   # "sine"或"sawtooth"
-        frequency_hz=10_000.0, # 900.0～110000.0
+        frequency_hz=10_000.0, # 250.0～210000.0
         phase_degrees=0.0,     # 0.0～359.99，正值表示滞后
         amplitude=8,           # 2、4、6、8四档
     )
@@ -68,7 +68,7 @@ Linux设备节点为`/dev/ttyS4`。运行用户必须属于`dialout`组。不要
 | 字段 | 单位/范围 | 编码 |
 |---|---|---|
 | `waveform` | 正弦或锯齿 | `0=sine`，`1=sawtooth` |
-| `frequency_mHz` | 900000～110000000 mHz | 目标Hz × 1000，四舍五入 |
+| `frequency_mHz` | 250000～210000000 mHz | 目标Hz × 1000，四舍五入 |
 | `phase_cdeg` | 0～35999 cdeg | 目标度数 × 100，四舍五入 |
 | `amplitude_code` | 2/4/6/8档 | `0=8/8`，`1=2/8`，`2=4/8`，`3=6/8` |
 
@@ -168,7 +168,7 @@ A5 5A 93 01 08 00 80 96 98 00 00 00 00 31 27 AB
 | 1 | MSPM0等待FPGA确认超时 |
 | 2 | FPGA确认帧格式或序号错误 |
 | 3 | FPGA确认帧CRC错误 |
-| 4 | 目标频率超出900～110000 Hz范围 |
+| 4 | 目标频率超出250～210000 Hz范围 |
 
 收到错误帧后不要把命令记为已执行。可记录错误并进行有限次数重试；如果连续出现
 错误1～3，应报告硬件链路故障，不要无限快速重发。建议单次端到端等待时间为1秒。
@@ -211,3 +211,8 @@ class WaveformController:
 
 浮点识别结果建议先量化再参与`last_target`比较，例如频率取整到1 Hz、相位取整到
 0.01°，否则视觉噪声会导致串口不断更新。
+
+若视觉题型要求自由输出二倍频，Radxa应在调用前计算
+`output_frequency_hz = detected_frequency_hz * 2`，再把最终输出频率传给
+`set_waveform()`。最终值不得超过210000 Hz；例如识别到105 kHz时传入210 kHz。
+自由模式不需要设置FPGA跟随模式的二倍频位，因为频率字已经是最终输出频率。

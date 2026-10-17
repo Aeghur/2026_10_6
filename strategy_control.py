@@ -19,11 +19,11 @@ from vision_calibrator import Camera, LensCorrector, ROOT
 STRATEGY_ROOT = ROOT / "board_strategy"
 sys.path.insert(0, str(STRATEGY_ROOT))
 
-from frequency_centerline import FrequencyStageBackend  # noqa: E402
 from lissajous_control import (  # noqa: E402
     Capabilities,
     Controller,
     Frame,
+    Options,
     Signal,
     Target,
 )
@@ -120,9 +120,9 @@ class BoardAdapter:
 
     def apply(self, signal: Signal) -> Signal:
         waveform = "sawtooth" if signal.waveform == "ramp" else "sine"
-        if signal.frequency_hz > 110_000:
+        if not 250.0 <= signal.frequency_hz <= 210_000:
             raise RuntimeError(
-                f"策略请求{signal.frequency_hz:.3f} Hz，当前协议上限为110000 Hz"
+                f"策略请求{signal.frequency_hz:.3f} Hz，当前协议范围为250～210000 Hz"
             )
         amplitude = self.amplitude_code(signal.vpp)
         # Strategy phase is positive lead; board protocol is positive lag.
@@ -196,6 +196,8 @@ def main() -> None:
         "--exposure-test-only", action="store_true",
         help="save startup exposure candidates and stop before strategy control",
     )
+    parser.add_argument("--no-control-time-limit", action="store_true",
+                        help="diagnostic run without the control deadline")
     args = parser.parse_args()
     if args.exposure_test_only and args.skip_exposure_test:
         parser.error("--exposure-test-only cannot be combined with --skip-exposure-test")
@@ -206,6 +208,7 @@ def main() -> None:
     output.mkdir(parents=True, exist_ok=True)
     adapter = BoardAdapter(cfg, output)
     decisions = []
+    timings = []
     try:
         if not args.skip_exposure_test:
             probe = Signal("ramp", 1e6 / (175.0 * 1.05), 4.0, 0.0, 175.0, 0.05)
@@ -221,22 +224,23 @@ def main() -> None:
 
         controller = Controller(
             calibration_id=f"fixed-camera-{stamp}",
+            options=Options(control_limit_s=None if args.no_control_time_limit else 10.0),
             capabilities=Capabilities(
                 ramp_supported=True, continuous_phase=True,
-                max_frequency_hz=110_000.0, max_vpp=4.0,
+                max_frequency_hz=210_000.0, max_vpp=4.0,
             ),
-            # This backend is called only while Controller.stage ==
-            # "frequency". It keeps the original bitmaps for the learned
-            # experts and supplies fitted 1 px centrelines solely to the
-            # explicit ramp-frequency geometry cross-check.
-            frequency_backend=FrequencyStageBackend(cfg, output),
+
         )
+        started = time.monotonic()
         decision = controller.start(Target(args.mode, args.height_div), adapter.signal)
+        timings.append({"operation": "controller_start_and_model_load", "seconds": time.monotonic()-started})
         while decision.status not in ("done", "failed", "stopped"):
             decisions.append(decision.to_dict())
             print("DECISION", json.dumps(decision.to_dict(), ensure_ascii=False), flush=True)
             if decision.status == "apply":
+                started = time.monotonic()
                 actual = adapter.apply(decision.command.signal)
+                timings.append({"operation": "apply_and_ack", "seconds": time.monotonic()-started})
                 applied_at = time.monotonic()
                 controller.applied(decision.command.command_id, actual, applied_at)
                 capture_after = controller.capture_after
@@ -244,7 +248,10 @@ def main() -> None:
                 capture_after = decision.capture_after_s or time.monotonic()
             else:
                 raise RuntimeError(f"unexpected controller status: {decision.status}")
+            started = time.monotonic()
             image, captured_at, frame_id = adapter.capture(capture_after)
+            timings.append({"operation": "wait_capture_preprocess_save", "frame_id": frame_id, "seconds": time.monotonic()-started})
+            started = time.monotonic()
             decision = controller.step(Frame(
                 image=image,
                 signal=adapter.signal,
@@ -253,8 +260,11 @@ def main() -> None:
                 captured_at_s=captured_at,
                 calibration_id=controller.calibration_id,
             ))
+            timings.append({"operation": "controller_step", "frame_id": frame_id, "seconds": time.monotonic()-started})
         decisions.append(decision.to_dict())
+        (output / "timings.json").write_text(json.dumps(timings, indent=2))
         result = decision.to_dict()
+        result["run_settings"] = {"control_limit_s": controller.options.control_limit_s, "exposure_absolute": adapter.camera.current_exposure}
         (output / "result.json").write_text(
             json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
         )

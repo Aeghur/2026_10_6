@@ -144,7 +144,7 @@ class Controller:
         self.telemetry['elapsed_s'] = now-self.started
         # The 10 s limit concerns acquisition of the goal, not the additional
         # 5 s evidence interval. Losing the goal after 10 s cannot restart it.
-        if self.stage != 'hold' and now-self.started > self.options.control_limit_s:
+        if self.stage != 'hold' and (self.options.control_limit_s is not None and now-self.started > self.options.control_limit_s):
             return self._fail('control_time_limit_exceeded')
         try:
             image = prepare_image(frame.image)
@@ -199,7 +199,7 @@ class Controller:
                 self.hold_start = timestamp; self.hold_reference = obs
             elif not ready or drift >= self.options.drift_limit_div:
                 self.hold_start = None; self.stage = 'phase_first'
-                if now-self.started > self.options.control_limit_s:
+                if (self.options.control_limit_s is not None and now-self.started > self.options.control_limit_s):
                     return self._fail('goal_lost_after_control_deadline')
                 return self._phase_first(image, timestamp)
             self.last_hold = timestamp
@@ -210,7 +210,7 @@ class Controller:
                 return self._result('done', 'goal_verified_by_fresh_sampled_images_for_5_seconds')
             return self._wait('continue_fresh_hold_sampling', timestamp+self.options.pair_interval_s)
         if self.stage != 'phase_quarter' and self._ready(obs):
-            if now-self.started > self.options.control_limit_s:
+            if (self.options.control_limit_s is not None and now-self.started > self.options.control_limit_s):
                 return self._fail('control_time_limit_exceeded')
             self.stage = 'hold'; self.hold_start = self.last_hold = timestamp; self.hold_reference = obs
             self.first_ready_time = now
