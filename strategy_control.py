@@ -69,8 +69,12 @@ class StrategyImageAdapter:
                 or x + width >= self.full_width - 3
                 or y + height >= self.full_height - 3
             )
+            thin_edge_artifact = touches_edge and (
+                width < self.full_width * 0.15
+                or height < self.full_height * 0.15
+            )
             spans_centre = x <= cx <= x + width or y <= cy <= y + height
-            if not touches_edge and spans_centre and area >= 16:
+            if not thin_edge_artifact and spans_centre and area >= 16:
                 cleaned[labels == label] = 255
         mask = cleaned
 
