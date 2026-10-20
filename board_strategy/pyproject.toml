@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lissajous-board-control"
+version = "1.0.0"
+description = "Image-only Lissajous frequency probing and experimental visual control"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24,<3", "Pillow>=10", "torch>=2.6,<3"]
+
+[project.scripts]
+lissajous-control = "lissajous_control.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["lissajous_control*"]
+
+[tool.setuptools.package-data]
+lissajous_control = ["assets/*.pt", "assets/*.json"]
