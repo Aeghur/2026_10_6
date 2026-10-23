@@ -103,6 +103,7 @@ module ads805 #(
     reg output_mode_dds = 1'b1;
     reg output_frequency_x2 = 1'b0;
     reg output_free_run = 1'b0;
+    reg output_waveform_saw = 1'b0;
     reg [1:0] output_amplitude_code = 2'd0;
     reg dds_config_valid = 1'b0;
     reg [31:0] configured_phase_step = 32'd0;
@@ -129,6 +130,7 @@ module ads805 #(
         .config_phase_step(dds_phase_step),
         .config_phase_lag(configured_phase_lag),
         .frequency_x2(output_frequency_x2),
+        .waveform_saw(output_waveform_saw),
         .amplitude_scale_code(output_amplitude_code),
         .reference_edge(comparator_rising_edge),
         .sample_valid(sample_strobe), .sample_data(sample_data),
@@ -204,6 +206,7 @@ module ads805 #(
     reg pending_mode_dds = 1'b0;
     reg pending_frequency_x2 = 1'b0;
     reg pending_free_run = 1'b0;
+    reg pending_waveform_saw = 1'b0;
     reg [1:0] pending_amplitude_code = 2'd0;
     reg [31:0] pending_phase_step = 32'd0;
     reg [31:0] pending_phase_lag = 32'd0;
@@ -273,6 +276,7 @@ module ads805 #(
                                 pending_frequency_x2 <= rx_byte[1];
                                 pending_amplitude_code <= rx_byte[3:2];
                                 pending_free_run <= rx_byte[4];
+                                pending_waveform_saw <= rx_byte[5];
                             end
                             1: pending_phase_step[7:0] <= rx_byte;
                             2: pending_phase_step[15:8] <= rx_byte;
@@ -308,6 +312,7 @@ module ads805 #(
                             output_frequency_x2 <= pending_frequency_x2;
                             output_amplitude_code <= pending_amplitude_code;
                             output_free_run <= pending_free_run;
+                            output_waveform_saw <= pending_waveform_saw;
                             configured_phase_step <= pending_phase_step;
                             configured_phase_lag <= pending_phase_lag;
                             dds_config_valid <= 1'b1;

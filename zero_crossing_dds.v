@@ -31,6 +31,7 @@ module zero_crossing_dds #(
     input  wire [31:0] config_phase_step,
     input  wire [31:0] config_phase_lag,
     input  wire        frequency_x2,
+    input  wire        waveform_saw,
     input  wire [1:0]  amplitude_scale_code,
     input  wire        reference_edge,
     input  wire        sample_valid,
@@ -143,6 +144,9 @@ module zero_crossing_dds #(
          calibration_delay_product[31:0] - calibration_lag_word);
 
     wire signed [15:0] sine_sample;
+    reg signed [15:0] saw_sample_pipe = 16'sd0;
+    wire signed [15:0] waveform_sample =
+        waveform_saw ? saw_sample_pipe : sine_sample;
     reg [11:0] envelope_pipe = 12'd0;
     reg [11:0] amplitude_ramp = 12'd0;
     localparam [11:0] RAMP_INCREMENT_CODES = RAMP_INCREMENT[11:0];
@@ -303,12 +307,19 @@ module zero_crossing_dds #(
         if (rst) begin
             envelope_pipe <= 12'd0;
             amplitude_ramp <= 12'd0;
+            saw_sample_pipe <= 16'sd0;
             rom_valid <= 1'b0;
             scaled_sample <= 29'sd0;
             scale_valid <= 1'b0;
             output_valid <= 1'b0;
             output_sample <= ADC_ZERO_CODE[11:0];
         end else begin
+            // Use the same phase accumulator as the sine ROM.  XORing the
+            // MSB converts unsigned phase 0...65535 into a signed ramp from
+            // -32768 to +32767.  The register matches the synchronous ROM's
+            // one-clock latency, so waveform switching does not change the
+            // output pipeline delay.
+            saw_sample_pipe <= $signed(output_phase[31:16] ^ 16'h8000);
             if (!enable || !locked) begin
                 amplitude_ramp <= 12'd0;
             end else if (sample_valid && amplitude_ramp < active_envelope) begin
@@ -329,7 +340,8 @@ module zero_crossing_dds #(
             scale_valid <= rom_valid;
             if (rom_valid)
                 scaled_sample <=
-                    $signed(sine_sample) * $signed({1'b0, envelope_pipe});
+                    $signed(waveform_sample) *
+                    $signed({1'b0, envelope_pipe});
 
             output_valid <= scale_valid;
             if (scale_valid) begin

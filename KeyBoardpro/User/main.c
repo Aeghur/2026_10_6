@@ -59,6 +59,7 @@ int main(void)
     uint32_t targetFrequencyMilliHz = 0U;
     uint32_t requestedFrequencyMilliHz;
     uint8_t requestedAmplitudeCode = 0U;
+    uint8_t requestedWaveform = 0U;
     uint8_t targetMode = MEASUREMENT_MODE_DDS;
     uint8_t requestedMode;
     uint8_t targetSequence = 0U;
@@ -88,12 +89,15 @@ int main(void)
         }
         if (PC_Link_TakeTargetRequest(
                 &targetSequence, &requestedFrequencyMilliHz,
-                &requestedPhase, &requestedAmplitudeCode)) {
+                &requestedPhase, &requestedAmplitudeCode,
+                &requestedWaveform)) {
             targetFrequencyMilliHz = requestedFrequencyMilliHz;
             targetPhase = requestedPhase;
             targetMode = (uint8_t) (
                 MEASUREMENT_MODE_DDS | MEASUREMENT_MODE_FREE_RUN |
-                (requestedAmplitudeCode << MEASUREMENT_MODE_AMPLITUDE_SHIFT));
+                (requestedAmplitudeCode << MEASUREMENT_MODE_AMPLITUDE_SHIFT) |
+                (requestedWaveform != 0U ?
+                 MEASUREMENT_MODE_WAVEFORM_SAW : 0U));
             controlChanged = true;
             targetAckPending = true;
         }

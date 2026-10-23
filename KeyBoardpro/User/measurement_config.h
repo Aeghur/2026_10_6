@@ -35,6 +35,7 @@
 #define MEASUREMENT_MODE_AMPLITUDE_MASK (0x0CU)
 #define MEASUREMENT_MODE_AMPLITUDE_SHIFT (2U)
 #define MEASUREMENT_MODE_FREE_RUN      (0x10U)
+#define MEASUREMENT_MODE_WAVEFORM_SAW  (0x20U)
 
 typedef struct {
     uint32_t frequencyMilliHz;

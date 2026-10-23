@@ -36,10 +36,19 @@ void MSP_UART_Link_Init(void)
     DL_UART_Main_enablePower(FPGA_UART_INST);
     delay_cycles(POWER_STARTUP_DELAY);
 
+#if HOST_UART_USE_RADXA_PINS
+    /* MSPM0 PB21 TX -> Radxa pin 15 RX; Radxa pin 11 TX -> PB22 RX. */
+    DL_GPIO_initPeripheralOutputFunction(
+        IOMUX_PINCM49, IOMUX_PINCM49_PF_UART1_TX);
+    DL_GPIO_initPeripheralInputFunction(
+        IOMUX_PINCM50, IOMUX_PINCM50_PF_UART1_RX);
+#else
+    /* Original USB-TTL/PC test connection: PB4 TX and PB5 RX. */
     DL_GPIO_initPeripheralOutputFunction(
         IOMUX_PINCM17, IOMUX_PINCM17_PF_UART1_TX);
     DL_GPIO_initPeripheralInputFunction(
         IOMUX_PINCM18, IOMUX_PINCM18_PF_UART1_RX);
+#endif
     DL_GPIO_initPeripheralOutputFunction(
         IOMUX_PINCM27, IOMUX_PINCM27_PF_UART4_TX);
     DL_GPIO_initPeripheralInputFunction(

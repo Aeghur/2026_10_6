@@ -9,6 +9,7 @@ from protocol import (
     TYPE_PC_SET_PHASE,
     TYPE_PC_SET_MODE,
     TYPE_PC_SET_TARGET,
+    TYPE_PC_SET_WAVEFORM,
     TYPE_PC_TARGET_ACK,
     TYPE_PC_RESULT,
     crc16_ccitt,
@@ -63,6 +64,17 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(frame.frame_type, TYPE_PC_SET_TARGET)
         self.assertEqual(struct.unpack("<IHB", frame.payload),
                          (10_000_000, 9000, 2))
+
+    def test_waveform_target_layout(self) -> None:
+        payload = struct.pack("<BIHB", 1, 10_000_000, 9000, 2)
+        frame = FrameDecoder().feed(
+            encode_frame(TYPE_PC_SET_WAVEFORM, 6, payload)
+        )[0]
+        self.assertEqual(frame.frame_type, TYPE_PC_SET_WAVEFORM)
+        self.assertEqual(
+            struct.unpack("<BIHB", frame.payload),
+            (1, 10_000_000, 9000, 2),
+        )
 
     def test_result_layout(self) -> None:
         samples = (2000, 2048, 2100, 2048)

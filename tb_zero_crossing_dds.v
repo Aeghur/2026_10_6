@@ -34,6 +34,10 @@ module tb_zero_crossing_dds #(
     wire [11:0] output_sample_free;
     wire locked_free;
     wire signal_present_free;
+    wire output_valid_saw;
+    wire [11:0] output_sample_saw;
+    wire locked_saw;
+    wire signal_present_saw;
     integer sample_index = 0;
     integer valid_count = 0;
     integer minimum_output = 4095;
@@ -47,6 +51,11 @@ module tb_zero_crossing_dds #(
     integer x2_minimum_output = 4095;
     integer x2_maximum_output = 0;
     reg x2_was_above = 1'b0;
+    integer saw_minimum_output = 4095;
+    integer saw_maximum_output = 0;
+    integer saw_wraps = 0;
+    integer saw_reverse_errors = 0;
+    integer previous_saw_output = 2104;
     real angle;
     real sample_real;
 
@@ -63,6 +72,7 @@ module tb_zero_crossing_dds #(
         .config_phase_step(config_phase_step),
         .config_phase_lag(config_phase_lag),
         .frequency_x2(1'b0),
+        .waveform_saw(1'b0),
         .amplitude_scale_code(2'd0),
         .reference_edge(reference_edge),
         .sample_valid(sample_valid), .sample_data(sample_data),
@@ -81,6 +91,7 @@ module tb_zero_crossing_dds #(
         .config_phase_step(config_phase_step),
         .config_phase_lag(32'h80000000),
         .frequency_x2(1'b0),
+        .waveform_saw(1'b0),
         .amplitude_scale_code(2'd0),
         .reference_edge(reference_edge),
         .sample_valid(sample_valid), .sample_data(sample_data),
@@ -100,6 +111,7 @@ module tb_zero_crossing_dds #(
         .config_phase_step(config_phase_step << 1),
         .config_phase_lag(config_phase_lag),
         .frequency_x2(1'b1),
+        .waveform_saw(1'b0),
         .amplitude_scale_code(2'd1),
         .reference_edge(reference_edge),
         .sample_valid(sample_valid), .sample_data(sample_data),
@@ -118,11 +130,30 @@ module tb_zero_crossing_dds #(
         .config_phase_step(config_phase_step),
         .config_phase_lag(32'h40000000),
         .frequency_x2(1'b0), .amplitude_scale_code(2'd1),
+        .waveform_saw(1'b0),
         .reference_edge(1'b0),
         .sample_valid(sample_valid), .sample_data(12'd2104),
         .output_valid(output_valid_free),
         .output_sample(output_sample_free),
         .locked(locked_free), .signal_present(signal_present_free)
+    );
+
+    zero_crossing_dds #(
+        .ADC_ZERO_CODE(2104),
+        .SAMPLE_HZ(SAMPLE_HZ),
+        .FREE_RUN_ENVELOPE_CODES(800),
+        .PIPELINE_ADVANCE_SAMPLES(10)
+    ) dut_saw (
+        .clk(clk), .rst(rst), .enable(enable), .free_run(1'b1),
+        .config_valid(config_valid),
+        .config_phase_step(config_phase_step),
+        .config_phase_lag(32'd0),
+        .frequency_x2(1'b0), .waveform_saw(1'b1),
+        .amplitude_scale_code(2'd0), .reference_edge(1'b0),
+        .sample_valid(sample_valid), .sample_data(12'd2104),
+        .output_valid(output_valid_saw),
+        .output_sample(output_sample_saw),
+        .locked(locked_saw), .signal_present(signal_present_saw)
     );
 
     always @(posedge clk) begin
@@ -164,6 +195,17 @@ module tb_zero_crossing_dds #(
             if (output_sample_x2 > x2_maximum_output)
                 x2_maximum_output <= output_sample_x2;
         end
+        if (output_valid_saw && dut_saw.amplitude_ramp == 800) begin
+            if (output_sample_saw < saw_minimum_output)
+                saw_minimum_output <= output_sample_saw;
+            if (output_sample_saw > saw_maximum_output)
+                saw_maximum_output <= output_sample_saw;
+            if (output_sample_saw + 1000 < previous_saw_output)
+                saw_wraps <= saw_wraps + 1;
+            else if (output_sample_saw < previous_saw_output)
+                saw_reverse_errors <= saw_reverse_errors + 1;
+            previous_saw_output <= output_sample_saw;
+        end
     end
 
     initial begin
@@ -184,6 +226,7 @@ module tb_zero_crossing_dds #(
         if (!signal_present || !locked || !signal_present_180 ||
             !locked_180 || !signal_present_x2 || !locked_x2 ||
             !signal_present_free || !locked_free ||
+            !signal_present_saw || !locked_saw ||
             dut_free.amplitude_ramp != 12'd800) begin
             $display("FAIL: DDS acquire signal=%0d lock=%0d envelope=%0d age=%0d samples=%0d step=%0d cross=%0d",
                      signal_present, locked, dut.envelope,
@@ -198,6 +241,8 @@ module tb_zero_crossing_dds #(
             x2_positive_crossings < 6 ||
             x2_minimum_output < 1900 || x2_minimum_output > 2050 ||
             x2_maximum_output < 2150 || x2_maximum_output > 2300 ||
+            saw_minimum_output > 1350 || saw_maximum_output < 2850 ||
+            saw_wraps < 3 || saw_reverse_errors != 0 ||
             (STEP_ERROR_PPM != 0 && dut.frequency_trim == 0)) begin
             $display("FAIL: invalid DDS output count/range/step %0d %0d %0d %0d x2=%0d..%0d",
                      valid_count, minimum_output, maximum_output, maximum_step,

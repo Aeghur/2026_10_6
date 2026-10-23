@@ -1,13 +1,13 @@
 # AD9226、DAC904 与 MSPM0 自动调相系统
 
-本项目实现可配置频率、相位和幅度的正弦输出，并保留FPGA内的实时锁相与
+本项目实现可配置频率、相位和幅度的正弦/锯齿输出，并保留FPGA内的实时锁相与
 流水线硬件：
 
 ```text
 AD9226 25 MSPS → FPGA 8192点可变延迟 ──────┐
 T14比较器方波 → 100ms门控测频 → 32位DDS频率字 → 六位数码管(Hz)
        └→ 上升沿相位参考 → 连续相位PI-DPLL → 正弦ROM ├→ 标定映射 → DAC904
-PC/Radxa → MSPM0参数转发 → 自由运行DDS频率字 ────────┘
+PC/Radxa → MSPM0参数转发 → 自由运行DDS正弦/锯齿 ─────┘
 
 PC 1 Mbaud ↔ MSPM0 ↔ FPGA 2 Mbaud
 ```
@@ -17,9 +17,9 @@ PC不直接连接FPGA。
 
 ## 工作过程
 
-1. PC发送目标频率、目标滞后角和幅度档位。
+1. PC或Radxa发送波形类型、目标频率、目标滞后角和幅度档位。
 2. MSPM0校验参数，换算32位DDS频率字和相位字并立即转发给FPGA。
-3. FPGA自由运行DDS连续输出目标正弦波。
+3. FPGA自由运行DDS连续输出目标正弦波或锯齿波。
 4. MSPM0返回轻量确认帧，表示命令已经校验并转发。
 
 MSPM0不再采集4096点数据，也不再运行FFT或计算延迟。比较器锁相DDS仍由FPGA
@@ -39,7 +39,7 @@ FFT。FPGA以50 MHz采样T14，经两级同步和4时钟周期滤波，
 显示整数Hz，例如10 kHz显示`010000`。ADC仍用于跟踪输出正弦的幅度。
 
 此外保留独立的“自由运行DDS”模式。PC向MSPM0发送目标频率、滞后相位和
-幅度档位后，MSPM0计算32位频率字并转发给FPGA；此模式不需要T14边沿或ADC
+波形类型和幅度档位后，MSPM0计算32位频率字并转发给FPGA；此模式不需要T14边沿或ADC
 输入，固定满幅采用实测4 Vpp输入对应的1783 ADC峰值码。自由运行和比较器锁相
 是两个独立模式，原有实时跟踪功能不受影响。
 
@@ -67,7 +67,7 @@ Quartus工程为 `ads805.qpf`，器件为 `EP4CE6F17C8`。
 | `variable_sample_delay.v` | 8192点整数可变延迟RAM |
 | `comparator_frequency_meter.v` | T14同步滤波、100 ms测频和DDS频率字计算 |
 | `six_digit_frequency_display.v` | 六位七段数码管扫描及Hz显示 |
-| `zero_crossing_dds.v` | 比较器上升沿鉴相、自适应PI环、连续相位DDS和包络跟踪 |
+| `zero_crossing_dds.v` | 比较器上升沿鉴相、自适应PI环、正弦ROM/锯齿生成和包络跟踪 |
 | `sine_rom_1024.v` | 仿真模型及Cyclone IV M9K正弦ROM封装 |
 | `sine_1024x16.mif` | 1024点Q1.15正弦表 |
 | `adc_dac_voltage_mapper.v` | 零点、增益、反相和饱和映射 |
@@ -141,16 +141,22 @@ python scope.py
 
 ```powershell
 python wave_control.py --port COM18 --frequency 10000 --phase 90 --amplitude 8
+python wave_control.py --port COM18 --waveform sawtooth --frequency 10000 --phase 0 --amplitude 8
 ```
+
+Radxa ROCK 4D使用同一个脚本和协议，只需把端口换为`/dev/ttyS4`。Linux启用
+UART4-M1、PB21/PB22接线及供图像程序调用的Python接口见
+[`radxa/README.md`](radxa/README.md)。
 
 自由运行频率范围为900～110000 Hz；`phase`沿用系统定义，正值表示输出滞后。
 界面的“2倍频”会在下发前将填写频率乘2，乘2后的目标仍须不超过110 kHz。
-命令采用PC协议类型`0x13`，7字节小端载荷依次为`frequency_mHz:u32`、
-`phase_cdeg:u16`、`amplitude_code:u8`。幅度编码`0/1/2/3`分别表示
+旧正弦命令保留协议类型`0x13`。新波形命令采用`0x14`，8字节小端载荷依次为
+`waveform:u8`、`frequency_mHz:u32`、`phase_cdeg:u16`、
+`amplitude_code:u8`，其中波形编码`0/1`为正弦/锯齿。幅度编码`0/1/2/3`分别表示
 `8/2/4/6`档，设计成0表示满幅以保持原有模式兼容。FPGA正确接收、校验并应用
 参数后，先向MSPM0返回`0x84 OUTPUT_ACK`；MSPM0只有收到该确认才向PC返回
 `0x93`确认帧，8字节载荷为`frequency_mHz:u32`、`phase_cdeg:u16`、
-`amplitude_code:u8`、`mode:u8`，不再返回大体积FFT结果帧。
+`amplitude_code:u8`、`mode:u8`；`mode`位5为1表示锯齿波，不再返回大体积FFT结果帧。
 
 FPGA的`0x84`确认帧格式为`A5 5A 84 seq 00 00 crc_lo crc_hi`，其中`seq`
 必须与本次`0x04 SET_OUTPUT`命令一致。MSPM0等待FPGA确认失败时，向PC返回
@@ -204,8 +210,12 @@ python dpll_control.py --port COM6 --phase 0
 |---|---|---|---:|
 | FPGA→MSPM0 | FPGA R13 | MSPM0 PB11/UART4_RX | 2 Mbaud |
 | MSPM0→FPGA | MSPM0 PB10/UART4_TX | FPGA T13 | 2 Mbaud |
-| MSPM0→PC | MSPM0 PB4/UART1_TX | USB-TTL RX | 1 Mbaud |
-| PC→MSPM0 | USB-TTL TX | MSPM0 PB5/UART1_RX | 1 Mbaud |
+| MSPM0→Radxa | MSPM0 PB21/UART1_TX | Radxa PIN 15/UART4_RX_M1 | 1 Mbaud |
+| Radxa→MSPM0 | Radxa PIN 11/UART4_TX_M1 | MSPM0 PB22/UART1_RX | 1 Mbaud |
+
+主机串口默认使用PB21/PB22。将`msp_uart_link.h`里的
+`HOST_UART_USE_RADXA_PINS`改为0并重新编译，可恢复PC USB-TTL使用的PB4/PB5；
+上层协议、波特率和PC脚本无需改变。
 
 MSPM0G3519的UART1位于PD0，BUSCLK为40 MHz，采用`2 + 32/64`分频和16倍
 过采样得到1 Mbaud；UART4位于PD1，BUSCLK为80 MHz，采用相同分频得到
