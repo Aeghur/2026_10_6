@@ -269,9 +269,9 @@ void UART1_IRQHandler(void)
                             ((uint16_t) gRxPayload[offset + 5U] << 8);
                         uint8_t amplitude = gRxPayload[offset + 6U];
                         if (frequency >=
-                                MEASUREMENT_MIN_SPECTRUM_HZ * 1000UL &&
+                                MEASUREMENT_MIN_FREE_RUN_HZ * 1000UL &&
                             frequency <=
-                                MEASUREMENT_MAX_SPECTRUM_HZ * 1000UL &&
+                                MEASUREMENT_MAX_FREE_RUN_HZ * 1000UL &&
                             phase < 36000U && amplitude < 4U &&
                             waveform < 2U) {
                             gTargetFrequencyMilliHz = frequency;

@@ -76,7 +76,7 @@ class ScopeApp:
         ttk.Label(bar, text="自由频率").pack(side=tk.LEFT, padx=(8, 3))
         self.target_frequency_var = tk.DoubleVar(value=10.0)
         ttk.Spinbox(
-            bar, from_=0.9, to=110.0, increment=0.1,
+            bar, from_=0.25, to=210.0, increment=0.000001,
             textvariable=self.target_frequency_var, width=7
         ).pack(side=tk.LEFT)
         ttk.Label(bar, text="kHz").pack(side=tk.LEFT)
@@ -177,16 +177,16 @@ class ScopeApp:
                 try:
                     frequency_khz = float(self.target_frequency_var.get())
                 except (ValueError, tk.TclError):
-                    self.status.set("自由运行频率必须是0.9～110 kHz的数字")
+                    self.status.set("自由运行频率必须是0.25～210 kHz的数字")
                     return
-                if not 0.9 <= frequency_khz <= 110.0:
-                    self.status.set("自由运行频率必须位于0.9～110 kHz")
+                if not 0.25 <= frequency_khz <= 210.0:
+                    self.status.set("自由运行频率必须位于0.25～210 kHz")
                     return
                 output_frequency_khz = frequency_khz * (
                     2.0 if self.frequency_x2_var.get() else 1.0
                 )
-                if output_frequency_khz > 110.0:
-                    self.status.set("启用2倍频后的输出必须不超过110 kHz")
+                if output_frequency_khz > 210.0:
+                    self.status.set("启用2倍频后的输出必须不超过210 kHz")
                     return
                 amplitude_code = {
                     "8": 0, "2": 1, "4": 2, "6": 3

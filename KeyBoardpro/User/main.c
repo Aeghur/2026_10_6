@@ -11,21 +11,12 @@
 
 static bool normalizeFrequency(uint32_t *frequencyMilliHz)
 {
-    const uint32_t minimumMilliHz = MEASUREMENT_MIN_SPECTRUM_HZ * 1000UL;
-    const uint32_t maximumMilliHz = MEASUREMENT_MAX_SPECTRUM_HZ * 1000UL;
+    const uint32_t minimumMilliHz = MEASUREMENT_MIN_FREE_RUN_HZ * 1000UL;
+    const uint32_t maximumMilliHz = MEASUREMENT_MAX_FREE_RUN_HZ * 1000UL;
 
-    if (*frequencyMilliHz < minimumMilliHz) {
-        if (minimumMilliHz - *frequencyMilliHz >
-            MEASUREMENT_EDGE_TOLERANCE_MILLIHZ)
-            return false;
-        *frequencyMilliHz = minimumMilliHz;
-    } else if (*frequencyMilliHz > maximumMilliHz) {
-        if (*frequencyMilliHz - maximumMilliHz >
-            MEASUREMENT_EDGE_TOLERANCE_MILLIHZ)
-            return false;
-        *frequencyMilliHz = maximumMilliHz;
-    }
-    return true;
+    /* Free-run commands are exact targets, not FFT-bin estimates. */
+    return *frequencyMilliHz >= minimumMilliHz &&
+           *frequencyMilliHz <= maximumMilliHz;
 }
 
 static bool calculateDDSWords(
@@ -46,10 +37,23 @@ static bool calculateDDSWords(
     if (!normalizeFrequency(&frequencyMilliHz))
         return false;
 
-    *phaseStep = (uint32_t)
-        (((uint64_t) frequencyMilliHz * phaseTurn + rateMilliHz / 2U) /
-         rateMilliHz);
+    /* Split before the extra six bits to avoid uint64 overflow at 210 kHz. */
+    {
+        const uint64_t numerator = (uint64_t) frequencyMilliHz * phaseTurn;
+        *phaseStep = (uint32_t) (
+            ((numerator / rateMilliHz) << 6) +
+            (((numerator % rateMilliHz) << 6) + rateMilliHz / 2U) /
+                rateMilliHz);
+    }
     return true;
+}
+
+static uint32_t actualFrequencyMilliHz(uint32_t phaseStep)
+{
+    const uint64_t turn = 0x4000000000ULL; /* 2^38 */
+    const uint64_t product = (uint64_t) phaseStep * MEASUREMENT_ADC_RATE_HZ;
+    return (uint32_t) ((product / turn) * 1000ULL +
+        ((product % turn) * 1000ULL + turn / 2U) / turn);
 }
 
 int main(void)
@@ -131,7 +135,8 @@ int main(void)
                 if (targetAckPending) {
                     if (fpgaStatus == FPGA_CAPTURE_OK)
                         PC_Link_SendTargetAck(
-                            targetSequence, targetFrequencyMilliHz,
+                            targetSequence,
+                            actualFrequencyMilliHz(phaseStep),
                             targetPhase, requestedAmplitudeCode, targetMode);
                     else
                         PC_Link_SendError(

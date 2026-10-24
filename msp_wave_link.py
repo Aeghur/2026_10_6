@@ -27,7 +27,7 @@ ERROR_TEXT = {
     1: "FPGA确认超时",
     2: "FPGA确认帧格式或序号错误",
     3: "FPGA确认帧CRC错误",
-    4: "目标频率超出范围",
+    4: "目标频率超出250～210000 Hz范围",
 }
 
 
@@ -51,8 +51,8 @@ def encode_target_payload(
     frequency_hz: float, phase_degrees: float, amplitude: int
 ) -> bytes:
     """Validate engineering units and build the SET_TARGET payload."""
-    if not 900.0 <= frequency_hz <= 110_000.0:
-        raise ValueError("frequency_hz必须位于900～110000 Hz")
+    if not 250.0 <= frequency_hz <= 210_000.0:
+        raise ValueError("frequency_hz必须位于250～210000 Hz")
     if not 0.0 <= phase_degrees < 360.0:
         raise ValueError("phase_degrees必须位于0～359.99度")
     if amplitude not in AMPLITUDE_CODES:

@@ -51,6 +51,7 @@ cd ad9226
 python3 -m pip install -r requirements.txt
 python3 wave_control.py --port /dev/ttyS4 --frequency 10000 --phase 90 --amplitude 8
 python3 wave_control.py --port /dev/ttyS4 --waveform sawtooth --frequency 10000 --phase 0 --amplitude 8
+python3 wave_control.py --port /dev/ttyS4 --frequency 210000 --phase 0 --amplitude 8
 ```
 
 只有MSPM0收到命令、FPGA应用参数并返回`0x84 OUTPUT_ACK`后，命令才会显示
@@ -79,3 +80,6 @@ Linux把UART表现为普通字符设备文件。应用写入的是字节流，�
 边界；本项目使用`A5 5A`同步头、类型、序号、长度和CRC16组成帧。序号用于把
 响应与请求对应，CRC用于发现传输错误。`MSPM0WaveLink`已经封装了组帧、CRC、
 超时和错误码，图像算法只需传入波形类型、频率、相位和幅度。
+
+视觉题型需要二倍频时，由Radxa先将识别频率乘2，再调用`set_waveform()`；最终
+自由输出频率上限为210 kHz。

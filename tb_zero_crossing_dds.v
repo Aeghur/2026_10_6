@@ -127,7 +127,7 @@ module tb_zero_crossing_dds #(
     ) dut_free (
         .clk(clk), .rst(rst), .enable(enable), .free_run(1'b1),
         .config_valid(config_valid),
-        .config_phase_step(config_phase_step),
+        .config_phase_step(config_phase_step << 6),
         .config_phase_lag(32'h40000000),
         .frequency_x2(1'b0), .amplitude_scale_code(2'd1),
         .waveform_saw(1'b0),
@@ -146,7 +146,7 @@ module tb_zero_crossing_dds #(
     ) dut_saw (
         .clk(clk), .rst(rst), .enable(enable), .free_run(1'b1),
         .config_valid(config_valid),
-        .config_phase_step(config_phase_step),
+        .config_phase_step(config_phase_step << 6),
         .config_phase_lag(32'd0),
         .frequency_x2(1'b0), .waveform_saw(1'b1),
         .amplitude_scale_code(2'd0), .reference_edge(1'b0),

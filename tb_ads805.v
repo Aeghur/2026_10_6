@@ -287,6 +287,19 @@ module tb_ads805;
             errors = errors + 1;
         end
 
+        // Reject words outside the free-run limits without applying them.
+        force dut.pending_free_run = 1'b1;
+        force dut.pending_phase_step = dut.FREE_RUN_MIN_STEP;
+        #1; if (!dut.pending_frequency_valid) $fatal(1,"minimum rejected");
+        force dut.pending_phase_step = dut.FREE_RUN_MIN_STEP - 1;
+        #1; if (dut.pending_frequency_valid) $fatal(1,"below minimum accepted");
+        force dut.pending_phase_step = dut.FREE_RUN_MAX_STEP;
+        #1; if (!dut.pending_frequency_valid) $fatal(1,"maximum rejected");
+        force dut.pending_phase_step = dut.FREE_RUN_MAX_STEP + 1;
+        #1; if (dut.pending_frequency_valid) $fatal(1,"above maximum accepted");
+        release dut.pending_phase_step;
+        release dut.pending_free_run;
+
         if (errors == 0)
             $display("PASS: capture, delay, sine/saw DDS and OUTPUT_ACK");
         else

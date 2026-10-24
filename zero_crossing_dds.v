@@ -47,6 +47,12 @@ module zero_crossing_dds #(
     reg [31:0] phase_lag = 32'd0;
     reg [31:0] applied_phase_lag = 32'd0;
     reg [31:0] carrier_phase = 32'd0;
+    // Free-run tuning words use 2^38 turns/sample. Keep the low six bits
+    // across frequency/phase updates; overflow advances the Q32 carrier.
+    reg [5:0] free_run_fraction = 6'd0;
+    reg [5:0] free_run_step_fraction = 6'd0;
+    wire [6:0] free_run_fraction_sum =
+        {1'b0, free_run_fraction} + {1'b0, free_run_step_fraction};
     reg signed [32:0] frequency_trim = 33'sd0;
     reg signed [32:0] proportional_trim = 33'sd0;
     reg signed [32:0] loop_error_shift = 33'sd0;
@@ -181,6 +187,8 @@ module zero_crossing_dds #(
             phase_lag <= 32'd0;
             applied_phase_lag <= 32'd0;
             carrier_phase <= 32'd0;
+            free_run_fraction <= 6'd0;
+            free_run_step_fraction <= 6'd0;
             frequency_trim <= 33'sd0;
             proportional_trim <= 33'sd0;
             loop_error_shift <= 33'sd0;
@@ -215,7 +223,8 @@ module zero_crossing_dds #(
             end
 
             if (config_valid) begin
-                phase_step <= config_phase_step;
+                phase_step <= free_run ? (config_phase_step >> 6) : config_phase_step;
+                free_run_step_fraction <= config_phase_step[5:0];
                 phase_lag <= config_phase_lag;
                 if (free_run) begin
                     locked <= config_phase_step != 0;
@@ -296,8 +305,12 @@ module zero_crossing_dds #(
                 // corrections alter phase slope rather than phase value, so
                 // the sine-ROM address remains continuous at every crossing.
                 if (!(!free_run && reference_crossing && signal_present &&
-                      phase_step != 0 && !locked && !reacquire))
-                    carrier_phase <= carrier_phase + phase_increment_wide[31:0];
+                      phase_step != 0 && !locked && !reacquire)) begin
+                    carrier_phase <= carrier_phase + phase_increment_wide[31:0] +
+                        (free_run ? free_run_fraction_sum[6] : 1'b0);
+                    if (free_run)
+                        free_run_fraction <= free_run_fraction_sum[5:0];
+                end
             end
         end
     end
@@ -314,11 +327,8 @@ module zero_crossing_dds #(
             output_valid <= 1'b0;
             output_sample <= ADC_ZERO_CODE[11:0];
         end else begin
-            // Use the same phase accumulator as the sine ROM.  XORing the
-            // MSB converts unsigned phase 0...65535 into a signed ramp from
-            // -32768 to +32767.  The register matches the synchronous ROM's
-            // one-clock latency, so waveform switching does not change the
-            // output pipeline delay.
+            // Rise linearly for the full cycle, then wrap directly to minimum.
+            // Match the sine ROM latency using the same phase accumulator.
             saw_sample_pipe <= $signed(output_phase[31:16] ^ 16'h8000);
             if (!enable || !locked) begin
                 amplitude_ramp <= 12'd0;

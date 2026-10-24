@@ -209,6 +209,15 @@ module ads805 #(
     reg pending_waveform_saw = 1'b0;
     reg [1:0] pending_amplitude_code = 2'd0;
     reg [31:0] pending_phase_step = 32'd0;
+    // Same rounded Q38 tuning-word limits as the MSPM0 (mHz protocol).
+    localparam [63:0] FREE_RUN_MIN_STEP =
+        (64'd250 * 64'd274877906944 + SAMPLE_HZ / 2) / SAMPLE_HZ;
+    localparam [63:0] FREE_RUN_MAX_STEP =
+        (64'd210000 * 64'd274877906944 + SAMPLE_HZ / 2) / SAMPLE_HZ;
+    wire pending_frequency_valid = !pending_free_run ||
+        (pending_phase_step >= FREE_RUN_MIN_STEP &&
+         pending_phase_step <= FREE_RUN_MAX_STEP);
+
     reg [31:0] pending_phase_lag = 32'd0;
     reg capture_request = 1'b0;
     reg output_ack_request = 1'b0;
@@ -307,7 +316,7 @@ module ads805 #(
                             configured_delay <=
                                 pending_delay[DELAY_ADDR_WIDTH-1:0];
                             delay_config_valid <= 1'b1;
-                        end else begin
+                        end else if (pending_frequency_valid) begin
                             output_mode_dds <= pending_mode_dds;
                             output_frequency_x2 <= pending_frequency_x2;
                             output_amplitude_code <= pending_amplitude_code;

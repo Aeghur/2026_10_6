@@ -117,6 +117,31 @@ class WaveLinkTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             encode_target_payload(1000.0, 0.0, 5)
 
+    def test_free_run_lower_boundary_and_fractional_probes(self):
+        for hz in (250.0, 272.108844, 544.217687, 544.218, 1177.232327,
+                   4270.766603, 5442.176871, 8658.008658, 13046.314416,
+                   13698.630137, 9090.909091, 5714.285714, 4484.304933,
+                   1236.093943, 571.428571, 285.714286,
+                   200000.0, 200005.0, 210000.0):
+            payload = encode_target_payload(hz, 0.0, 4)
+            mhz, phase, amplitude = struct.unpack("<IHB", payload)
+            self.assertEqual(mhz, round(hz * 1000))
+            step = round(mhz * 2**38 / 25_000_000_000)
+            actual = round(step * 25_000_000_000 / 2**38) / 1000
+            self.assertLessEqual(abs(actual - hz), max(0.002, hz * 0.5e-6) + 1e-10)
+            self.assertEqual((phase, amplitude), (0, 2))
+        for hz in (249.999, 210000.001):
+            with self.assertRaises(ValueError):
+                encode_target_payload(hz, 0.0, 4)
+
+    def test_free_run_frequency_upper_boundary(self):
+        payload = encode_target_payload(210_000.0, 0.0, 8)
+        self.assertEqual(
+            struct.unpack("<IHB", payload), (210_000_000, 0, 0)
+        )
+        with self.assertRaises(ValueError):
+            encode_target_payload(210_000.001, 0.0, 8)
+
 
 if __name__ == "__main__":
     unittest.main()

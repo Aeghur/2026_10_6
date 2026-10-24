@@ -19,7 +19,7 @@ def main() -> int:
         help="MSPM0串口，例如Windows的COM18或Radxa的/dev/ttyS4"
     )
     parser.add_argument("--frequency", type=float, required=True,
-                        help="目标输出频率，单位Hz，范围900～110000")
+                        help="目标输出频率，单位Hz，范围250～210000")
     parser.add_argument("--phase", type=float, default=0.0,
                         help="目标滞后相位，单位度，范围0～359.99")
     parser.add_argument("--amplitude", type=int, choices=(2, 4, 6, 8),
@@ -30,8 +30,8 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if not 900.0 <= args.frequency <= 110_000.0:
-        parser.error("--frequency必须位于900～110000 Hz")
+    if not 250.0 <= args.frequency <= 210_000.0:
+        parser.error("--frequency必须位于250～210000 Hz")
     if not 0.0 <= args.phase < 360.0:
         parser.error("--phase必须位于0～359.99度")
 
