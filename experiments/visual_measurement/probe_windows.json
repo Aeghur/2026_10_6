@@ -1,0 +1,22 @@
+{
+  "version": "landmark-grid100-v1",
+  "scope": "independent_geometric_experiment_only",
+  "input_grid_hz": 100,
+  "input_min_hz": 1000,
+  "input_max_hz": 100000,
+  "reset_ratio": 0.0,
+  "exposure_absolute": 80,
+  "gain": 0,
+  "direction": "rising",
+  "amplitude_code": 8,
+  "primary_frequencies_hz": [500, 1000, 2000, 5000, 10000, 20000],
+  "disambiguation_frequency_hz": 700,
+  "backup_frequency_hz": 1100,
+  "notes": [
+    "Use exact f and T=1e6/f; do not round 700/1100 Hz periods to integer microseconds.",
+    "Actual ACK frequency and independently calibrated full ramp height must be used in measurements.",
+    "The 100 Hz grid is a stated problem prior, not permission to snap an unconfirmed estimate to a solution.",
+    "Extra windows improve discrimination but do not guarantee uniqueness for all images.",
+    "Existing trained-model windows and original strategy remain unchanged."
+  ]
+}
