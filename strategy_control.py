@@ -14,6 +14,7 @@ import cv2
 import numpy as np
 
 from msp_wave_link import MSPM0WaveLink
+from frequency_calibration import set_calibrated_waveform
 from vision_calibrator import Camera, LensCorrector, ROOT
 
 STRATEGY_ROOT = ROOT / "board_strategy"
@@ -127,7 +128,16 @@ class BoardAdapter:
         amplitude = self.amplitude_code(signal.vpp)
         # Strategy phase is positive lead; board protocol is positive lag.
         lag = (-signal.phase_deg) % 360.0
-        self.link.set_waveform(waveform, signal.frequency_hz, lag, amplitude)
+        if getattr(self, 'cfg', {}).get('enable_frequency_calibration', False):
+            ack, setting = set_calibrated_waveform(
+                self.link, waveform, signal.frequency_hz, lag, amplitude)
+            record = dict(**setting.to_dict(), ack_frequency_hz=ack.frequency_millihz / 1000)
+            print('FREQUENCY_SETTING', json.dumps(record), flush=True)
+            if hasattr(self, 'output'):
+                with (self.output / 'frequency_settings.jsonl').open('a') as stream:
+                    stream.write(json.dumps(record) + '\n')
+        else:
+            self.link.set_waveform(waveform, signal.frequency_hz, lag, amplitude)
         self.signal = signal
         return signal
 

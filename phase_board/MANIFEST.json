@@ -1,0 +1,18 @@
+{
+  "package": "lissajous_phase_board_v1",
+  "sha256": {
+    "README_zh.txt": "c04b0a8148398e73cdbb6d08f849f93c003df5150c7427644dd23305a983bc84",
+    "TRAINING_PROVENANCE.json": "a486f68d7e65f92e2a7eb15c311c2e9a41c8b4d4a6eaad08acd492026e5ad81d",
+    "VALIDATION.json": "62f6c29af32e4382701547f0c76e156d142166037da5cc28e5573a3dd3df415b",
+    "examples/board_loop.py": "e53da6026b1e64bbc071e6f531fba38dfc7729eb88807b140322239176c81ae2",
+    "phase_control/__init__.py": "06936262660f74cb6f6c66f93a6452f1a3b45d38940b0b55a1ce4520434e6cbc",
+    "phase_control/__main__.py": "92525233e18ef854dc0554705bc1709c490af90c7b685dfd22da22007a307395",
+    "phase_control/branches.py": "49d09dff9e969fc5033dfe9ae3be1e594bdf84d837230a8328a7c10dfa68c634",
+    "phase_control/controller.py": "49a08d4ca959da39fc4b5e56876131797df808d849701d5bd0643b44aab2ff79",
+    "phase_control/fit.py": "6da33fac3f80f7d215e5350f00d35fe71caa4186626bd8e32f602064ab62e01a",
+    "phase_control/pixels.py": "758524c7f7d7e561e3e1014b8fb076f2832623d5f70f540c96b8afb5bcabf4d8",
+    "pyproject.toml": "bc78c4c74e97bd19fba42e12e9b85fb9b64e65d841bbb5103f054235108abef1",
+    "requirements.txt": "6daefc5669913a2a8e15b7d8a7e1adee83dc7900375c0e9f557bc1debf22e2a5",
+    "tests/test_phase_control.py": "f94477ccf3a8269d00fbf8bd80256dca94b1a7b2cb271afa9346e5ef5338ec4c"
+  }
+}

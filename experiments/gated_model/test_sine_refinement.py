@@ -32,6 +32,18 @@ class SineTests(unittest.TestCase):
     def test_blank_rejected(self):
         with self.assertRaises(ValueError):score_image(np.zeros((640,960),np.uint8))
 class FinishOutputTests(unittest.TestCase):
+    def test_calibrated_final_output_logs_nominal_and_checks_command(self):
+        from two_stage import finish_output
+        from protocol import TargetAck
+        link=Mock()
+        link.set_waveform.return_value=TargetAck(60000433,0,0,17)
+        log={}
+        waveform,ack=finish_output(link,dict(status='frequency_candidate',frequency_hz=60000),
+            calibration_enabled=True,frequency_log=log)
+        self.assertEqual(waveform,'sine')
+        link.set_waveform.assert_called_once_with('sine',60000.433,0,8)
+        self.assertEqual(log['target_frequency_hz'],60000)
+        self.assertEqual(log['command_frequency_hz'],60000.433)
     def test_success_holds_selected_sine(self):
         from two_stage import finish_output
         link=Mock()

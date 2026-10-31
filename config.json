@@ -1,6 +1,7 @@
 {
   "camera_device": "/dev/video0",
   "control_backend": "uart",
+  "enable_frequency_calibration": true,
   "serial_port": "/dev/ttyS4",
   "signal_url": "http://192.168.137.1:8765/api/y",
   "frame_width": 1280,

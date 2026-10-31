@@ -2,20 +2,20 @@
   "description": "Current camera grid and HSV extraction for the hollow saw experiment",
   "full_grid_corners": [
     [
-      157,
-      63
+      96.08796333192508,
+      60.80696818211676
     ],
     [
-      1158,
-      40
+      1086.9739279059893,
+      38.85588336382159
     ],
     [
-      1176,
-      708
+      1101.76556945083,
+      700.7814599880037
     ],
     [
-      173,
-      729
+      110.84605272537539,
+      721.6318763505263
     ]
   ],
   "grid_dimensions_div": [
@@ -53,5 +53,16 @@
     "scan_duration_assumed_correct": true,
     "independent_voltage_measurement": false,
     "camera_or_y_scale_changes_require_recalibration": true
+  },
+  "calibration_source_image": "/home/radxa/vision_sorter/artifacts/diagnostics/camera_position_20261031_184055/raw.jpg",
+  "calibration_method": "77 intersections from 11 vertical and 7 horizontal interior blue grid lines; fitted homography",
+  "geometry_validation": {
+    "held_out_intersection_rms_px": 0.14025109963454244,
+    "pixels_per_division": 80,
+    "full_canvas_pixels": [
+      960,
+      640
+    ],
+    "vertical_scale_note": "Retained previous effective ramp height in grid-normalized pixels. Absolute ramp scale not recalibrated without known-frequency reference."
   }
 }

@@ -11,11 +11,17 @@ from sine_refinement import candidates,score_image,choose
 from vision_calibrator import Camera
 from strategy_control import StrategyImageAdapter
 from msp_wave_link import MSPM0WaveLink
+from frequency_calibration import set_calibrated_waveform, waveform_frequency
 
 
-def finish_output(link,refinement):
+def finish_output(link,refinement,*,calibration_enabled=False,frequency_log=None):
     frequency=refinement.get('frequency_hz')
     if refinement.get('status')=='frequency_candidate' and frequency is not None:
+        if calibration_enabled:
+            ack,setting=set_calibrated_waveform(link,'sine',frequency,0,8)
+            if frequency_log is not None:frequency_log.update(setting.to_dict())
+            return 'sine',ack
+        if frequency_log is not None:frequency_log.update(waveform_frequency('sine',frequency,enabled=False).to_dict())
         return 'sine',link.set_waveform('sine',frequency,0,8)
     return 'decay_pulse',link.set_decay_pulse(100,0,8)
 

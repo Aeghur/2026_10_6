@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import json
+from pathlib import Path
+from frequency_calibration import set_calibrated_waveform, waveform_frequency
 from msp_wave_link import (
     MSPM0CommandError,
     MSPM0LinkError,
@@ -32,7 +35,14 @@ def main() -> int:
     )
     parser.add_argument("--direction", choices=("rising", "falling"),
                         default="rising", help="锯齿方向：缓升快降或缓降快升")
+    parser.add_argument("--no-frequency-calibration", action="store_true")
     args = parser.parse_args()
+    cfg = json.loads(Path(__file__).with_name("config.json").read_text())
+    calibrated = cfg.get("enable_frequency_calibration", True) and not args.no_frequency_calibration
+    try:
+        waveform_frequency(args.waveform, args.frequency, enabled=calibrated)
+    except ValueError as error:
+        parser.error(str(error))
     if args.direction == "falling" and args.waveform != "sawtooth":
         parser.error("--direction falling仅适用于--waveform sawtooth")
 
@@ -48,8 +58,9 @@ def main() -> int:
 
     try:
         with MSPM0WaveLink(args.port) as link:
-            ack = link.set_waveform(
-                args.waveform, args.frequency, args.phase, args.amplitude,
+            ack, setting = set_calibrated_waveform(
+                link, args.waveform, args.frequency, args.phase, args.amplitude,
+                enabled=calibrated,
                 direction=args.direction, decay_microseconds=args.decay_us
             )
     except MSPM0TimeoutError as error:
@@ -61,6 +72,7 @@ def main() -> int:
     except (MSPM0LinkError, OSError) as error:
         print(f"串口通信失败：{error}")
         return 3
+    print("FREQUENCY_SETTING", json.dumps(setting.to_dict(), ensure_ascii=False))
     decay_text = (f"，下降 {ack.decay_microseconds} us"
                   if args.waveform == "decay_pulse" else "")
     print(
