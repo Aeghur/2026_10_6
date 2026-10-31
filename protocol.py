@@ -108,12 +108,15 @@ class TargetAck:
     phase_centidegrees: int
     amplitude_code: int
     mode: int
+    decay_microseconds: int = 0
 
 
 def decode_target_ack(payload: bytes) -> TargetAck:
-    if len(payload) != 8:
-        raise ValueError("TARGET_ACK payload must be 8 bytes")
-    return TargetAck(*struct.unpack("<IHBB", payload))
+    if len(payload) == 8:
+        return TargetAck(*struct.unpack("<IHBB", payload))
+    if len(payload) == 10:
+        return TargetAck(*struct.unpack("<IHBBH", payload))
+    raise ValueError("TARGET_ACK payload must be 8 or 10 bytes")
 
 
 def decode_result(payload: bytes) -> CaptureResult:

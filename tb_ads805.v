@@ -232,7 +232,7 @@ module tb_ads805;
         calculated_crc = crc16_next(calculated_crc, 8'h3a);
         calculated_crc = crc16_next(calculated_crc, 8'h09);
         calculated_crc = crc16_next(calculated_crc, 8'h00);
-        calculated_crc = crc16_next(calculated_crc, 8'h31);
+        calculated_crc = crc16_next(calculated_crc, 8'h71);
         calculated_crc = crc16_next(calculated_crc, 8'h44);
         calculated_crc = crc16_next(calculated_crc, 8'h33);
         calculated_crc = crc16_next(calculated_crc, 8'h22);
@@ -249,7 +249,7 @@ module tb_ads805;
                 send_uart_byte(8'h3a);
                 send_uart_byte(8'h09);
                 send_uart_byte(8'h00);
-                send_uart_byte(8'h31);
+                send_uart_byte(8'h71);
                 send_uart_byte(8'h44);
                 send_uart_byte(8'h33);
                 send_uart_byte(8'h22);
@@ -280,6 +280,8 @@ module tb_ads805;
         #2000;
         if (dut.output_free_run !== 1'b1 ||
             dut.output_waveform_saw !== 1'b1 ||
+            dut.output_saw_reverse !== 1'b1 ||
+            dut.zero_crossing_dds_inst.saw_reverse !== 1'b1 ||
             dut.dds_phase_step !== 32'h11223344 ||
             dut.dds_locked !== 1'b1 ||
             dut.dds_signal_present !== 1'b1) begin
@@ -297,6 +299,14 @@ module tb_ads805;
         #1; if (!dut.pending_frequency_valid) $fatal(1,"maximum rejected");
         force dut.pending_phase_step = dut.FREE_RUN_MAX_STEP + 1;
         #1; if (dut.pending_frequency_valid) $fatal(1,"above maximum accepted");
+        force dut.pending_waveform_saw = 1'b0;
+        force dut.pending_saw_reverse = 1'b1;
+        force dut.pending_phase_step = dut.DECAY_PULSE_STEP;
+        #1; if (!dut.pending_frequency_valid) $fatal(1,"100 Hz decay rejected");
+        force dut.pending_saw_reverse = 1'b0;
+        #1; if (dut.pending_frequency_valid) $fatal(1,"100 Hz non-decay accepted");
+        release dut.pending_waveform_saw;
+        release dut.pending_saw_reverse;
         release dut.pending_phase_step;
         release dut.pending_free_run;
 

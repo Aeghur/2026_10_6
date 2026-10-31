@@ -19,13 +19,14 @@ static volatile uint32_t gTargetFrequencyMilliHz;
 static volatile uint16_t gTargetPhaseCentiDegrees;
 static volatile uint8_t gTargetAmplitudeCode;
 static volatile uint8_t gTargetWaveform;
+static volatile uint16_t gTargetDecayMicroseconds;
 static uint8_t gRxState;
 static uint8_t gRxType;
 static uint8_t gRxSequence;
 static uint8_t gRxCrcLow;
 static uint16_t gRxCrc;
 static uint8_t gRxLength;
-static uint8_t gRxPayload[8];
+static uint8_t gRxPayload[10];
 static uint8_t gRxPayloadIndex;
 
 static uint16_t crc16Update(uint16_t crc, uint8_t value)
@@ -95,7 +96,7 @@ void PC_Link_Init(void)
 bool PC_Link_TakeTargetRequest(
     uint8_t *sequence, uint32_t *frequencyMilliHz,
     uint16_t *phaseCentiDegrees, uint8_t *amplitudeCode,
-    uint8_t *waveform)
+    uint8_t *waveform, uint16_t *decayMicroseconds)
 {
     __disable_irq();
     if (!gTargetPending) {
@@ -107,6 +108,7 @@ bool PC_Link_TakeTargetRequest(
     *phaseCentiDegrees = gTargetPhaseCentiDegrees;
     *amplitudeCode = gTargetAmplitudeCode;
     *waveform = gTargetWaveform;
+    *decayMicroseconds = gTargetDecayMicroseconds;
     gTargetPending = false;
     __enable_irq();
     return true;
@@ -140,15 +142,21 @@ bool PC_Link_TakePhaseRequest(uint16_t *phaseCentiDegrees)
 
 void PC_Link_SendTargetAck(
     uint8_t sequence, uint32_t frequencyMilliHz,
-    uint16_t phaseCentiDegrees, uint8_t amplitudeCode, uint8_t mode)
+    uint16_t phaseCentiDegrees, uint8_t amplitudeCode, uint8_t mode,
+    uint16_t decayMicroseconds)
 {
     uint16_t crc;
 
-    beginFrame(FRAME_TYPE_TARGET_ACK, sequence, 8U, &crc);
+    beginFrame(FRAME_TYPE_TARGET_ACK, sequence,
+        (mode & MEASUREMENT_MODE_WAVEFORM_DECAY) != 0U &&
+        (mode & MEASUREMENT_MODE_WAVEFORM_SAW) == 0U ? 10U : 8U, &crc);
     sendU32(frequencyMilliHz, &crc);
     sendU16(phaseCentiDegrees, &crc);
     sendCheckedByte(amplitudeCode, &crc);
     sendCheckedByte(mode, &crc);
+    if ((mode & MEASUREMENT_MODE_WAVEFORM_DECAY) != 0U &&
+        (mode & MEASUREMENT_MODE_WAVEFORM_SAW) == 0U)
+        sendU16(decayMicroseconds, &crc);
     endFrame(crc);
 }
 
@@ -205,7 +213,7 @@ void UART1_IRQHandler(void)
                     (gRxType == FRAME_TYPE_SET_TARGET &&
                      gRxLength != 7U) ||
                     (gRxType == FRAME_TYPE_SET_WAVEFORM &&
-                     gRxLength != 8U)) {
+                     gRxLength != 8U && gRxLength != 10U)) {
                     gRxState = 0U;
                 } else {
                     gRxState = 6U;
@@ -248,12 +256,12 @@ void UART1_IRQHandler(void)
                                gRxLength == 1U &&
                                (gOutputMode == MEASUREMENT_MODE_PIPELINE ||
                                 ((gOutputMode & MEASUREMENT_MODE_DDS_MASK) != 0U &&
-                                 (gOutputMode & 0xC0U) == 0U))) {
+                                 (gOutputMode & 0x80U) == 0U))) {
                         gModePending = true;
                     } else if ((gRxType == FRAME_TYPE_SET_TARGET &&
                                 gRxLength == 7U) ||
                                (gRxType == FRAME_TYPE_SET_WAVEFORM &&
-                                gRxLength == 8U)) {
+                                (gRxLength == 8U || gRxLength == 10U))) {
                         uint8_t offset =
                             gRxType == FRAME_TYPE_SET_WAVEFORM ? 1U : 0U;
                         uint8_t waveform =
@@ -268,16 +276,26 @@ void UART1_IRQHandler(void)
                             (uint16_t) gRxPayload[offset + 4U] |
                             ((uint16_t) gRxPayload[offset + 5U] << 8);
                         uint8_t amplitude = gRxPayload[offset + 6U];
-                        if (frequency >=
-                                MEASUREMENT_MIN_FREE_RUN_HZ * 1000UL &&
-                            frequency <=
-                                MEASUREMENT_MAX_FREE_RUN_HZ * 1000UL &&
+                        uint16_t decayMicroseconds =
+                            waveform == 3U && gRxLength == 10U ?
+                            ((uint16_t) gRxPayload[8] |
+                             ((uint16_t) gRxPayload[9] << 8)) : 1000U;
+                        if (((waveform == 3U && frequency == 100000UL) ||
+                             (waveform < 3U && frequency >=
+                                  MEASUREMENT_MIN_FREE_RUN_HZ * 1000UL &&
+                              frequency <=
+                                  MEASUREMENT_MAX_FREE_RUN_HZ * 1000UL)) &&
                             phase < 36000U && amplitude < 4U &&
-                            waveform < 2U) {
+                            waveform < 4U &&
+                            (waveform == 3U ?
+                             (decayMicroseconds >= 1U &&
+                              decayMicroseconds <= 9999U &&
+                              gRxLength == 10U) : gRxLength != 10U)) {
                             gTargetFrequencyMilliHz = frequency;
                             gTargetPhaseCentiDegrees = phase;
                             gTargetAmplitudeCode = amplitude;
                             gTargetWaveform = waveform;
+                            gTargetDecayMicroseconds = decayMicroseconds;
                             gTargetSequence = gRxSequence;
                             gTargetPending = true;
                         }

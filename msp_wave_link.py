@@ -22,7 +22,7 @@ from protocol import (
 
 BAUD = 1_000_000
 AMPLITUDE_CODES = {8: 0, 2: 1, 4: 2, 6: 3}
-WAVEFORM_CODES = {"sine": 0, "sawtooth": 1}
+WAVEFORM_CODES = {"sine": 0, "sawtooth": 1, "decay_pulse": 3}
 ERROR_TEXT = {
     1: "FPGA确认超时",
     2: "FPGA确认帧格式或序号错误",
@@ -48,11 +48,12 @@ class MSPM0CommandError(MSPM0LinkError):
 
 
 def encode_target_payload(
-    frequency_hz: float, phase_degrees: float, amplitude: int
+    frequency_hz: float, phase_degrees: float, amplitude: int,
+    *, minimum_hz: float = 250.0
 ) -> bytes:
     """Validate engineering units and build the SET_TARGET payload."""
-    if not 250.0 <= frequency_hz <= 210_000.0:
-        raise ValueError("frequency_hz必须位于250～210000 Hz")
+    if not minimum_hz <= frequency_hz <= 210_000.0:
+        raise ValueError(f"frequency_hz必须位于{minimum_hz:g}～210000 Hz")
     if not 0.0 <= phase_degrees < 360.0:
         raise ValueError("phase_degrees必须位于0～359.99度")
     if amplitude not in AMPLITUDE_CODES:
@@ -69,16 +70,31 @@ def encode_target_payload(
 
 def encode_waveform_payload(
     waveform: str, frequency_hz: float, phase_degrees: float,
-    amplitude: int
+    amplitude: int, *, direction: str = "rising",
+    decay_microseconds: int = 1000
 ) -> bytes:
     """Build SET_WAVEFORM: waveform:u8 followed by legacy target fields."""
     try:
         waveform_code = WAVEFORM_CODES[waveform]
     except KeyError as error:
-        raise ValueError("waveform必须是sine或sawtooth") from error
-    return bytes((waveform_code,)) + encode_target_payload(
-        frequency_hz, phase_degrees, amplitude
+        raise ValueError("waveform必须是sine、sawtooth或decay_pulse") from error
+    if direction not in ("rising", "falling"):
+        raise ValueError("direction必须是rising或falling")
+    if direction == "falling":
+        if waveform != "sawtooth":
+            raise ValueError("falling方向仅适用于sawtooth")
+        waveform_code = 2
+    if waveform == "decay_pulse" and frequency_hz != 100.0:
+        raise ValueError("decay_pulse波形频率固定为100 Hz")
+    if waveform == "decay_pulse" and not 1 <= decay_microseconds <= 9999:
+        raise ValueError("decay_microseconds必须位于1～9999 us")
+    payload = bytes((waveform_code,)) + encode_target_payload(
+        frequency_hz, phase_degrees, amplitude,
+        minimum_hz=100.0 if waveform == "decay_pulse" else 250.0
     )
+    if waveform == "decay_pulse":
+        payload += struct.pack("<H", decay_microseconds)
+    return payload
 
 
 class MSPM0WaveLink:
@@ -160,13 +176,19 @@ class MSPM0WaveLink:
 
     def set_waveform(
         self, waveform: str, frequency_hz: float,
-        phase_degrees: float = 0.0, amplitude: int = 8
+        phase_degrees: float = 0.0, amplitude: int = 8,
+        *, direction: str = "rising", decay_microseconds: int = 1000
     ) -> TargetAck:
-        """Set a sine or sawtooth and wait for the FPGA acknowledgement."""
+        """Set a sine, sawtooth or 100 Hz decay pulse and await FPGA ACK."""
         payload = encode_waveform_payload(
-            waveform, frequency_hz, phase_degrees, amplitude
+            waveform, frequency_hz, phase_degrees, amplitude,
+            direction=direction, decay_microseconds=decay_microseconds
         )
-        expected_saw = waveform == "sawtooth"
+        expected_waveform_bits = {
+            "sine": 0x00,
+            "sawtooth": 0x60 if direction == "falling" else 0x20,
+            "decay_pulse": 0x40,
+        }[waveform]
         with self._lock:
             if self._serial is None:
                 self.open()
@@ -191,9 +213,14 @@ class MSPM0WaveLink:
                             raise MSPM0LinkError(
                                 "MSPM0确认帧未标记为自由运行模式"
                             )
-                        if bool(ack.mode & 0x20) != expected_saw:
+                        if ack.mode & 0x60 != expected_waveform_bits:
                             raise MSPM0LinkError(
                                 "MSPM0确认的波形类型与请求不一致"
+                            )
+                        if (waveform == "decay_pulse" and
+                                ack.decay_microseconds != decay_microseconds):
+                            raise MSPM0LinkError(
+                                "MSPM0确认的下降时间与请求不一致"
                             )
                         return ack
             raise MSPM0TimeoutError(
@@ -202,8 +229,18 @@ class MSPM0WaveLink:
 
     def set_sawtooth(
         self, frequency_hz: float, phase_degrees: float = 0.0,
-        amplitude: int = 8
+        amplitude: int = 8, *, direction: str = "rising"
     ) -> TargetAck:
         return self.set_waveform(
-            "sawtooth", frequency_hz, phase_degrees, amplitude
+            "sawtooth", frequency_hz, phase_degrees, amplitude, direction=direction
+        )
+
+    def set_decay_pulse(
+        self, decay_microseconds: int = 1000,
+        phase_degrees: float = 0.0, amplitude: int = 8
+    ) -> TargetAck:
+        """Output the fixed 100 Hz pulse: 9 ms zero, then 1 ms decay."""
+        return self.set_waveform(
+            "decay_pulse", 100.0, phase_degrees, amplitude,
+            decay_microseconds=decay_microseconds
         )

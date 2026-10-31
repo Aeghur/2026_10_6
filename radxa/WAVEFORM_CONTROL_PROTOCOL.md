@@ -27,7 +27,8 @@ with MSPM0WaveLink("/dev/ttyS4", timeout=1.0) as waveform:
         waveform="sawtooth",   # "sine"或"sawtooth"
         frequency_hz=10_000.0, # 250.0～210000.0
         phase_degrees=0.0,     # 0.0～359.99，正值表示滞后
-        amplitude=8,           # 2、4、6、8四档
+        amplitude=4,           # 2、4、6、8四档
+        direction="falling",  # rising=缓升快降；falling=缓降快升
     )
     print(ack)
 ```
@@ -43,6 +44,7 @@ source .venv/bin/activate
 python wave_control.py \
   --port /dev/ttyS4 \
   --waveform sawtooth \
+  --direction falling \
   --frequency 10000 \
   --phase 0 \
   --amplitude 8
@@ -67,7 +69,7 @@ Linux设备节点为`/dev/ttyS4`。运行用户必须属于`dialout`组。不要
 
 | 字段 | 单位/范围 | 编码 |
 |---|---|---|
-| `waveform` | 正弦或锯齿 | `0=sine`，`1=sawtooth` |
+| `waveform` | 波形类型 | `0=正弦`，`1=缓升快降锯齿`，`2=缓降快升锯齿`，`3=100 Hz快降脉冲` |
 | `frequency_mHz` | 250000～210000000 mHz | 目标Hz × 1000，四舍五入 |
 | `phase_cdeg` | 0～35999 cdeg | 目标度数 × 100，四舍五入 |
 | `amplitude_code` | 2/4/6/8档 | `0=8/8`，`1=2/8`，`2=4/8`，`3=6/8` |
@@ -98,11 +100,14 @@ CRC参数：多项式`0x1021`、初值`0xFFFF`、不反射、无最终异或。C
 
 ## 设置波形：`0x14 SET_WAVEFORM`
 
-请求类型为`0x14`，payload固定8字节：
+请求类型为`0x14`。正弦和锯齿payload为8字节：
 
 ```text
 waveform:u8 + frequency_mHz:u32LE + phase_cdeg:u16LE + amplitude_code:u8
 ```
+
+`waveform=3`的快降脉冲在末尾追加`decay_us:u16LE`，payload共10字节。
+频率必须为100000 mHz，`decay_us`范围1～9999，默认界面值为1000。
 
 示例：序号1、锯齿、10000 Hz、0°、8/8幅度：
 
@@ -129,11 +134,14 @@ B7 A7             CRC = 0xA7B7，小端发送
 
 ## 成功确认：`0x93 TARGET_ACK`
 
-成功响应类型为`0x93`，sequence必须与请求相同，payload固定8字节：
+成功响应类型为`0x93`，sequence必须与请求相同。普通波形payload为8字节：
 
 ```text
 frequency_mHz:u32LE + phase_cdeg:u16LE + amplitude_code:u8 + mode:u8
 ```
+
+快降脉冲确认在末尾追加已应用的`decay_us:u16LE`，共10字节。客户端必须核对
+该字段与请求一致，才能将下降时间标记为生效。
 
 上述锯齿命令的响应示例：
 
@@ -150,11 +158,16 @@ A5 5A 93 01 08 00 80 96 98 00 00 00 00 31 27 AB
 | 3:2 | 幅度编码 |
 | 4 | 自由运行模式；Radxa目标命令必须为1 |
 | 5 | 波形；`0=正弦`，`1=锯齿` |
-| 7:6 | 保留，必须为0 |
+| 6 | 锯齿方向；`0=缓升快降`，`1=缓降快升` |
+| 7 | 保留，必须为0 |
 
 示例中的`mode=0x31`表示DDS、自由运行、锯齿、8/8幅度。客户端在宣告成功前
-至少应检查：类型为`0x93`、序号匹配、CRC正确、位4为1、位5与请求波形一致。
+至少应检查：类型为`0x93`、序号匹配、CRC正确、位4为1、位5与请求波形一致、位6与请求方向一致。
 响应中的相位和幅度应与请求一致；频率应按本文量化容差校验，不要求与原始浮点请求逐位相等。
+
+位5:6组合定义为：`00=正弦`、`01=缓升快降锯齿`、`11=缓降快升锯齿`、
+`10=100 Hz快降脉冲`。快降脉冲的请求频率必须为100000 mHz；每个10 ms周期中，
+低电平时间为`10000-decay_us`，随后瞬间跳到正峰值，并在`decay_us`内线性下降到0。
 
 注意：该确认不是MSPM0“已收到串口数据”的简单回显。MSPM0会先向FPGA发送
 `SET_OUTPUT`，等待FPGA返回有效ACK，然后才向Radxa发送`0x93`。
@@ -194,16 +207,21 @@ class WaveformController:
 
     def open(self):
         self.link.open()
+        self.last_target = None
 
     def close(self):
         self.link.close()
+        self.last_target = None
 
-    def apply(self, waveform, frequency_hz, phase_degrees, amplitude):
-        target = (waveform, frequency_hz, phase_degrees, amplitude)
+    def apply(self, waveform, frequency_hz, phase_degrees, amplitude,
+              *, direction="rising"):
+        target = (waveform, frequency_hz, phase_degrees, amplitude, direction)
         if target == self.last_target:
             return None
+        self.last_target = None  # 确认失败时不保留可能已失效的状态
         ack = self.link.set_waveform(
-            waveform, frequency_hz, phase_degrees, amplitude
+            waveform, frequency_hz, phase_degrees, amplitude,
+            direction=direction
         )
         self.last_target = target
         return ack
@@ -235,3 +253,46 @@ class WaveformController:
 `round(frequency_mHz * 2^38 / (25000000 * 1000))`，25 MHz下步进约
 0.000090949 Hz。MSPM0与FPGA须配套升级；跟随模式仍使用原Q32频率字，
 相位字仍为Q32。改频率和相位时保持累加器（含小数余数）连续。
+
+
+### 锯齿方向控制
+
+`0x14 SET_WAVEFORM`的普通波形保持8字节payload；首字节waveform为：
+0=正弦，1=缓升快降锯齿（兼容旧命令），2=缓降快升锯齿，3=快降脉冲。
+waveform=3使用10字节payload，在原字段后追加`decay_us:u16LE`。
+MSPM0向FPGA转发的mode位5选择锯齿，位6选择反向；`0x93`回执mode位6
+同步返回方向，客户端检查方向是否匹配。正弦应清除位6。
+方向表示数字DAC码的变化方向；若实际模拟链路反相，可选择相反方向补偿。
+切换方向保留累加器，但波形极性翻转可能造成瞬时电压跳变。
+
+```python
+# 与默认锯齿方向相反，频率、幅度和相位定义不变
+ack = link.set_sawtooth(544.218, 0.0, 4, direction="falling")
+# 恢复原方向
+ack = link.set_sawtooth(544.218, 0.0, 4, direction="rising")
+```
+
+命令行：
+```sh
+python3 wave_control.py --port /dev/ttyS4 --waveform sawtooth --direction falling --frequency 544.218 --phase 0 --amplitude 4
+```
+MSPM0、FPGA和客户端需要配套更新；旧固件不支持waveform=2。
+
+
+#### 反向锯齿完整帧示例
+
+序号1、544.218 Hz、0°、4/8幅度、`direction="falling"`，请求为：
+
+```text
+A5 5A 14 01 08 00 02 DA 4D 08 00 00 00 02 C5 17
+```
+
+对应成功回执如下（此频率的实际设置四舍五入到mHz仍为544218）：
+
+```text
+A5 5A 93 01 08 00 DA 4D 08 00 00 00 02 79 74 9A
+```
+
+回执`mode=0x79`：DDS启用、自由运行、锯齿、4/8幅度、反向。
+仅修改请求首字节waveform后必须重新计算CRC，不能复用另一方向的CRC。
+缓存目标时应包含direction；只有确认成功后才记录新目标，重连后清空缓存。

@@ -30,8 +30,12 @@ module zero_crossing_dds #(
     input  wire        config_valid,
     input  wire [31:0] config_phase_step,
     input  wire [31:0] config_phase_lag,
+    input  wire [15:0] config_decay_start,
+    input  wire [31:0] config_decay_scale_q16,
     input  wire        frequency_x2,
     input  wire        waveform_saw,
+    input  wire        saw_reverse,
+    input  wire        waveform_decay,
     input  wire [1:0]  amplitude_scale_code,
     input  wire        reference_edge,
     input  wire        sample_valid,
@@ -151,8 +155,15 @@ module zero_crossing_dds #(
 
     wire signed [15:0] sine_sample;
     reg signed [15:0] saw_sample_pipe = 16'sd0;
+    reg signed [15:0] decay_sample_pipe = 16'sd0;
+    wire [15:0] decay_phase_remaining =
+        16'hffff - output_phase[31:16];
+    wire [47:0] decay_product =
+        decay_phase_remaining * config_decay_scale_q16;
+    wire [31:0] decay_scaled = decay_product[47:16];
     wire signed [15:0] waveform_sample =
-        waveform_saw ? saw_sample_pipe : sine_sample;
+        waveform_decay ? decay_sample_pipe :
+        (waveform_saw ? saw_sample_pipe : sine_sample);
     reg [11:0] envelope_pipe = 12'd0;
     reg [11:0] amplitude_ramp = 12'd0;
     localparam [11:0] RAMP_INCREMENT_CODES = RAMP_INCREMENT[11:0];
@@ -321,6 +332,7 @@ module zero_crossing_dds #(
             envelope_pipe <= 12'd0;
             amplitude_ramp <= 12'd0;
             saw_sample_pipe <= 16'sd0;
+            decay_sample_pipe <= 16'sd0;
             rom_valid <= 1'b0;
             scaled_sample <= 29'sd0;
             scale_valid <= 1'b0;
@@ -329,7 +341,18 @@ module zero_crossing_dds #(
         end else begin
             // Rise linearly for the full cycle, then wrap directly to minimum.
             // Match the sine ROM latency using the same phase accumulator.
-            saw_sample_pipe <= $signed(output_phase[31:16] ^ 16'h8000);
+            // Complement reverses polarity without changing phase accumulation.
+            saw_sample_pipe <= $signed(
+                (output_phase[31:16] ^ 16'h8000) ^
+                (saw_reverse ? 16'hffff : 16'h0000));
+            // Fixed 100 Hz pulse with a host-controlled decay duration.
+            // MSPM0 supplies the Q16 start phase and reciprocal slope.
+            if (output_phase[31:16] < config_decay_start)
+                decay_sample_pipe <= 16'sd0;
+            else if (decay_scaled > 32'd32767)
+                decay_sample_pipe <= 16'sd32767;
+            else
+                decay_sample_pipe <= $signed(decay_scaled[15:0]);
             if (!enable || !locked) begin
                 amplitude_ramp <= 12'd0;
             end else if (sample_valid && amplitude_ramp < active_envelope) begin

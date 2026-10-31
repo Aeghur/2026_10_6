@@ -265,14 +265,16 @@ bool Keypad_Control_HandleKey(
 
     if (key == 'D') {
         *outputMode &= (uint8_t) ~(MEASUREMENT_MODE_FREE_RUN |
-                                   MEASUREMENT_MODE_WAVEFORM_SAW);
+                                   MEASUREMENT_MODE_WAVEFORM_SAW |
+                                   MEASUREMENT_MODE_SAW_REVERSE);
         *outputMode |= MEASUREMENT_MODE_DDS_MASK;
         *outputMode ^= MEASUREMENT_MODE_X2_MASK;
         return true;
     }
 
     if (key == '2' || key == '4' || key == '6' || key == '8') {
-        *outputMode &= (uint8_t) ~MEASUREMENT_MODE_WAVEFORM_SAW;
+        *outputMode &= (uint8_t) ~(MEASUREMENT_MODE_WAVEFORM_SAW |
+                                   MEASUREMENT_MODE_SAW_REVERSE);
         *outputMode &= (uint8_t) ~MEASUREMENT_MODE_AMPLITUDE_MASK;
         *outputMode |= (uint8_t)
             (amplitudeCodeForKey(key) <<

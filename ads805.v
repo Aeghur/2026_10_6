@@ -104,10 +104,15 @@ module ads805 #(
     reg output_frequency_x2 = 1'b0;
     reg output_free_run = 1'b0;
     reg output_waveform_saw = 1'b0;
+    reg output_saw_reverse = 1'b0;
+    wire output_waveform_decay =
+        output_saw_reverse && !output_waveform_saw;
     reg [1:0] output_amplitude_code = 2'd0;
     reg dds_config_valid = 1'b0;
     reg [31:0] configured_phase_step = 32'd0;
     reg [31:0] configured_phase_lag = 32'd0;
+    reg [15:0] configured_decay_start = 16'he665;
+    reg [31:0] configured_decay_scale_q16 = 32'd327650;
     wire [11:0] dds_sample_data;
     wire dds_sample_valid;
     wire dds_locked;
@@ -129,8 +134,12 @@ module ads805 #(
                       (!output_free_run && measured_frequency_valid)),
         .config_phase_step(dds_phase_step),
         .config_phase_lag(configured_phase_lag),
+        .config_decay_start(configured_decay_start),
+        .config_decay_scale_q16(configured_decay_scale_q16),
         .frequency_x2(output_frequency_x2),
         .waveform_saw(output_waveform_saw),
+        .saw_reverse(output_saw_reverse),
+        .waveform_decay(output_waveform_decay),
         .amplitude_scale_code(output_amplitude_code),
         .reference_edge(comparator_rising_edge),
         .sample_valid(sample_strobe), .sample_data(sample_data),
@@ -207,6 +216,7 @@ module ads805 #(
     reg pending_frequency_x2 = 1'b0;
     reg pending_free_run = 1'b0;
     reg pending_waveform_saw = 1'b0;
+    reg pending_saw_reverse = 1'b0;
     reg [1:0] pending_amplitude_code = 2'd0;
     reg [31:0] pending_phase_step = 32'd0;
     // Same rounded Q38 tuning-word limits as the MSPM0 (mHz protocol).
@@ -214,11 +224,19 @@ module ads805 #(
         (64'd250 * 64'd274877906944 + SAMPLE_HZ / 2) / SAMPLE_HZ;
     localparam [63:0] FREE_RUN_MAX_STEP =
         (64'd210000 * 64'd274877906944 + SAMPLE_HZ / 2) / SAMPLE_HZ;
+    localparam [63:0] DECAY_PULSE_STEP =
+        (64'd100 * 64'd274877906944 + SAMPLE_HZ / 2) / SAMPLE_HZ;
+    wire pending_waveform_decay =
+        pending_saw_reverse && !pending_waveform_saw;
     wire pending_frequency_valid = !pending_free_run ||
-        (pending_phase_step >= FREE_RUN_MIN_STEP &&
-         pending_phase_step <= FREE_RUN_MAX_STEP);
+        (pending_waveform_decay ?
+         (pending_phase_step == DECAY_PULSE_STEP) :
+         (pending_phase_step >= FREE_RUN_MIN_STEP &&
+          pending_phase_step <= FREE_RUN_MAX_STEP));
 
     reg [31:0] pending_phase_lag = 32'd0;
+    reg [15:0] pending_decay_start = 16'he665;
+    reg [31:0] pending_decay_scale_q16 = 32'd327650;
     reg capture_request = 1'b0;
     reg output_ack_request = 1'b0;
     wire request_crc_ok = ({rx_byte, rx_crc_low} == rx_crc);
@@ -264,7 +282,8 @@ module ads805 #(
                         (request_type == 8'h03 &&
                          rx_payload_length[7:0] != 2) ||
                         (request_type == 8'h04 &&
-                         rx_payload_length[7:0] != 9))
+                         rx_payload_length[7:0] != 9 &&
+                         rx_payload_length[7:0] != 15))
                         rx_state <= 0;
                     else if (rx_payload_length[7:0] == 0)
                         rx_state <= 7;
@@ -286,6 +305,7 @@ module ads805 #(
                                 pending_amplitude_code <= rx_byte[3:2];
                                 pending_free_run <= rx_byte[4];
                                 pending_waveform_saw <= rx_byte[5];
+                                pending_saw_reverse <= rx_byte[6];
                             end
                             1: pending_phase_step[7:0] <= rx_byte;
                             2: pending_phase_step[15:8] <= rx_byte;
@@ -295,6 +315,12 @@ module ads805 #(
                             6: pending_phase_lag[15:8] <= rx_byte;
                             7: pending_phase_lag[23:16] <= rx_byte;
                             8: pending_phase_lag[31:24] <= rx_byte;
+                            9: pending_decay_start[7:0] <= rx_byte;
+                            10: pending_decay_start[15:8] <= rx_byte;
+                            11: pending_decay_scale_q16[7:0] <= rx_byte;
+                            12: pending_decay_scale_q16[15:8] <= rx_byte;
+                            13: pending_decay_scale_q16[23:16] <= rx_byte;
+                            14: pending_decay_scale_q16[31:24] <= rx_byte;
                             default: ;
                         endcase
                     end
@@ -322,8 +348,12 @@ module ads805 #(
                             output_amplitude_code <= pending_amplitude_code;
                             output_free_run <= pending_free_run;
                             output_waveform_saw <= pending_waveform_saw;
+                            output_saw_reverse <= pending_saw_reverse;
                             configured_phase_step <= pending_phase_step;
                             configured_phase_lag <= pending_phase_lag;
+                            configured_decay_start <= pending_decay_start;
+                            configured_decay_scale_q16 <=
+                                pending_decay_scale_q16;
                             dds_config_valid <= 1'b1;
                             output_ack_request <= 1'b1;
                         end

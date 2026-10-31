@@ -100,6 +100,12 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(ack.phase_centidegrees, 9000)
         self.assertEqual(ack.amplitude_code, 2)
         self.assertEqual(ack.mode, 0x19)
+        self.assertEqual(ack.decay_microseconds, 0)
+
+        decay_payload = struct.pack(
+            "<IHBBH", 100_000, 0, 0, 0x51, 750)
+        decay_ack = decode_target_ack(decay_payload)
+        self.assertEqual(decay_ack.decay_microseconds, 750)
 
     def test_mspm0_error_layout(self) -> None:
         frame = encode_frame(TYPE_ERROR, 4, struct.pack("<H", 3))

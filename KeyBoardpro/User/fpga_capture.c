@@ -81,9 +81,10 @@ void FPGA_Capture_SetDelay(uint8_t sequence, uint16_t delaySamples)
 
 FPGA_CaptureStatus FPGA_Capture_SetOutput(
     uint8_t sequence, uint8_t mode, uint32_t phaseStep,
-    uint32_t phaseLag)
+    uint32_t phaseLag, uint16_t decayStart,
+    uint32_t decayScaleQ16)
 {
-    uint8_t frame[17];
+    uint8_t frame[23];
     uint8_t value;
     uint8_t previous = 0U;
     uint8_t header[4];
@@ -100,7 +101,7 @@ FPGA_CaptureStatus FPGA_Capture_SetOutput(
     frame[1] = 0x5AU;
     frame[2] = FPGA_TYPE_SET_OUTPUT;
     frame[3] = sequence;
-    frame[4] = 9U;
+    frame[4] = 15U;
     frame[5] = 0U;
     frame[6] = mode;
     frame[7] = (uint8_t) phaseStep;
@@ -111,10 +112,16 @@ FPGA_CaptureStatus FPGA_Capture_SetOutput(
     frame[12] = (uint8_t) (phaseLag >> 8);
     frame[13] = (uint8_t) (phaseLag >> 16);
     frame[14] = (uint8_t) (phaseLag >> 24);
-    for (index = 2U; index < 15U; index++)
+    frame[15] = (uint8_t) decayStart;
+    frame[16] = (uint8_t) (decayStart >> 8);
+    frame[17] = (uint8_t) decayScaleQ16;
+    frame[18] = (uint8_t) (decayScaleQ16 >> 8);
+    frame[19] = (uint8_t) (decayScaleQ16 >> 16);
+    frame[20] = (uint8_t) (decayScaleQ16 >> 24);
+    for (index = 2U; index < 21U; index++)
         crc = crc16Update(crc, frame[index]);
-    frame[15] = (uint8_t) crc;
-    frame[16] = (uint8_t) (crc >> 8);
+    frame[21] = (uint8_t) crc;
+    frame[22] = (uint8_t) (crc >> 8);
     for (index = 0U; index < sizeof(frame); index++)
         DL_UART_Main_transmitDataBlocking(FPGA_UART_INST, frame[index]);
 

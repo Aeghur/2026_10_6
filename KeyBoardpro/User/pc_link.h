@@ -12,10 +12,11 @@ bool PC_Link_TakeModeRequest(uint8_t *mode);
 bool PC_Link_TakeTargetRequest(
     uint8_t *sequence, uint32_t *frequencyMilliHz,
     uint16_t *phaseCentiDegrees, uint8_t *amplitudeCode,
-    uint8_t *waveform);
+    uint8_t *waveform, uint16_t *decayMicroseconds);
 void PC_Link_SendTargetAck(
     uint8_t sequence, uint32_t frequencyMilliHz,
-    uint16_t phaseCentiDegrees, uint8_t amplitudeCode, uint8_t mode);
+    uint16_t phaseCentiDegrees, uint8_t amplitudeCode, uint8_t mode,
+    uint16_t decayMicroseconds);
 void PC_Link_SendError(uint8_t sequence, uint16_t errorCode);
 
 #endif

@@ -15,6 +15,7 @@ FPGA_CaptureStatus FPGA_Capture_Run(
 void FPGA_Capture_SetDelay(uint8_t sequence, uint16_t delaySamples);
 FPGA_CaptureStatus FPGA_Capture_SetOutput(
     uint8_t sequence, uint8_t mode, uint32_t phaseStep,
-    uint32_t phaseLag);
+    uint32_t phaseLag, uint16_t decayStart,
+    uint32_t decayScaleQ16);
 
 #endif

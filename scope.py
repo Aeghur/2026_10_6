@@ -1,389 +1,250 @@
-"""MSPM0 FFT capture and spectrum display."""
+"""PC waveform control using the same UART interface as Radxa."""
 from __future__ import annotations
 
-import csv
 import queue
-import struct
 import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import ttk
+from datetime import datetime
 
-import numpy as np
-import serial
 from serial.tools import list_ports
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from matplotlib.figure import Figure
 
-from protocol import (
-    CaptureResult,
-    FrameDecoder,
-    TYPE_ERROR,
-    TYPE_PC_CAPTURE,
-    TYPE_PC_SET_PHASE,
-    TYPE_PC_SET_MODE,
-    TYPE_PC_SET_TARGET,
-    TYPE_PC_TARGET_ACK,
-    TYPE_PC_RESULT,
-    decode_error,
-    decode_result,
-    decode_target_ack,
-    encode_frame,
-)
-
-BAUD = 1_000_000
+from msp_wave_link import MSPM0WaveLink, encode_waveform_payload
 
 
 class ScopeApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        root.title("AD9226 / MSPM0 波形控制")
-        root.geometry("1350x760")
-        self.serial: serial.Serial | None = None
-        self.stop_event = threading.Event()
-        self.events: queue.Queue[tuple[str, object]] = queue.Queue()
-        self.latest: CaptureResult | None = None
-        self.sequence = 0
-
-        bar = ttk.Frame(root, padding=8)
-        bar.pack(fill=tk.X)
-        ttk.Label(bar, text="串口").pack(side=tk.LEFT)
-        self.port_var = tk.StringVar()
-        self.port_box = ttk.Combobox(bar, textvariable=self.port_var, width=16)
-        self.port_box.pack(side=tk.LEFT, padx=5)
-        ttk.Button(bar, text="刷新", command=self.refresh_ports).pack(side=tk.LEFT)
-        self.connect_btn = ttk.Button(
-            bar, text="连接", command=self.toggle_connection
-        )
-        self.connect_btn.pack(side=tk.LEFT, padx=8)
-        self.capture_btn = ttk.Button(
-            bar, text="应用输出", command=self.capture, state=tk.DISABLED
-        )
-        self.capture_btn.pack(side=tk.LEFT, padx=8)
-        ttk.Label(bar, text="目标滞后").pack(side=tk.LEFT, padx=(12, 3))
-        self.phase_var = tk.DoubleVar(value=90.0)
-        ttk.Spinbox(
-            bar, from_=0.0, to=359.99, increment=1.0,
-            textvariable=self.phase_var, width=7
-        ).pack(side=tk.LEFT)
-        ttk.Label(bar, text="°").pack(side=tk.LEFT)
-        ttk.Label(bar, text="输出模式").pack(side=tk.LEFT, padx=(12, 3))
-        self.mode_var = tk.StringVar(value="自由运行DDS")
-        self.mode_box = ttk.Combobox(
-            bar, textvariable=self.mode_var, width=12, state="readonly",
-            values=("自由运行DDS",)
-        )
-        self.mode_box.pack(side=tk.LEFT)
-        ttk.Label(bar, text="自由频率").pack(side=tk.LEFT, padx=(8, 3))
-        self.target_frequency_var = tk.DoubleVar(value=10.0)
-        ttk.Spinbox(
-            bar, from_=0.25, to=210.0, increment=0.000001,
-            textvariable=self.target_frequency_var, width=7
-        ).pack(side=tk.LEFT)
-        ttk.Label(bar, text="kHz").pack(side=tk.LEFT)
-        self.frequency_x2_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            bar, text="2倍频", variable=self.frequency_x2_var
-        ).pack(side=tk.LEFT, padx=(8, 0))
-        ttk.Label(bar, text="输出幅度").pack(side=tk.LEFT, padx=(8, 3))
-        self.amplitude_var = tk.StringVar(value="8")
-        self.amplitude_box = ttk.Combobox(
-            bar, textvariable=self.amplitude_var, width=3, state="readonly",
-            values=("2", "4", "6", "8")
-        )
-        self.amplitude_box.pack(side=tk.LEFT)
-        ttk.Label(bar, text="/8").pack(side=tk.LEFT)
-        ttk.Label(bar, text="频谱单位").pack(side=tk.LEFT, padx=(8, 3))
-        self.db_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            bar, text="相对 dB", variable=self.db_var, command=self.redraw
-        ).pack(side=tk.LEFT)
-        ttk.Button(bar, text="保存 CSV", command=self.save_csv).pack(side=tk.RIGHT)
-
-        self.figure = Figure(figsize=(10, 6), dpi=100)
-        self.time_axis = self.figure.add_subplot(211)
-        self.freq_axis = self.figure.add_subplot(212)
-        self.figure.tight_layout(pad=2.2)
-        self.canvas = FigureCanvasTkAgg(self.figure, master=root)
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=8)
-
-        self.status = tk.StringVar(value="未连接")
-        ttk.Label(root, textvariable=self.status, padding=8).pack(fill=tk.X)
+        root.title("PC 波形控制 · MSPM0 → FPGA")
+        root.geometry("940x760")
+        root.minsize(800, 640)
+        self.link = None
+        self.busy = False
+        self.closing = False
+        self.events = queue.Queue()
+        self.port = tk.StringVar()
+        self.waveform = tk.StringVar(value="正弦波")
+        self.direction = tk.StringVar(value="缓升快降")
+        self.frequency = tk.StringVar(value="10000.000")
+        self.phase = tk.StringVar(value="0.00")
+        self.amplitude = tk.StringVar(value="8")
+        self.decay_microseconds = tk.StringVar(value="1000")
+        self.double = tk.BooleanVar(value=False)
+        self.status = tk.StringVar(value="未连接；连接不会自动改变输出")
+        self.confirmed = tk.StringVar(value="尚无已确认的输出参数")
+        outer = ttk.Frame(root, padding=18)
+        outer.pack(fill="both", expand=True)
+        ttk.Label(outer, text="自由运行波形控制", font=("Microsoft YaHei UI", 20, "bold")).pack(anchor="w")
+        ttk.Label(outer, text="与 Radxa 共用协议 · 1,000,000 baud / 8N1 · 250 Hz～210 kHz").pack(anchor="w", pady=(4, 14))
+        bar = ttk.Frame(outer)
+        bar.pack(fill="x")
+        ttk.Label(bar, text="串口").pack(side="left")
+        self.port_box = ttk.Combobox(bar, textvariable=self.port, width=24)
+        self.port_box.pack(side="left", padx=8)
+        self.refresh_btn = ttk.Button(bar, text="刷新", command=self.refresh_ports)
+        self.refresh_btn.pack(side="left")
+        self.connect_btn = ttk.Button(bar, text="连接", command=self.toggle_connection)
+        self.connect_btn.pack(side="left", padx=8)
+        panel = ttk.LabelFrame(outer, text="目标参数（编辑后点击应用）", padding=14)
+        panel.pack(fill="x", pady=14)
+        self.inputs = []
+        def field(row, label, variable, values=None):
+            ttk.Label(panel, text=label).grid(row=row, column=0, sticky="w", pady=6)
+            if values:
+                widget = ttk.Combobox(panel, textvariable=variable, values=values, state="readonly", width=24)
+            else:
+                widget = ttk.Entry(panel, textvariable=variable, width=27)
+            widget.grid(row=row, column=1, sticky="w", padx=12)
+            self.inputs.append(widget)
+            return widget
+        field(0, "波形", self.waveform, ("正弦波", "锯齿波", "100 Hz 快降脉冲"))
+        self.direction_box = field(1, "锯齿方向", self.direction, ("缓升快降", "缓降快升"))
+        self.frequency_entry = field(2, "频率 / Hz", self.frequency)
+        self.frequency_hint = ttk.Label(panel, text="精度 0.001 Hz；最终输出 250～210000 Hz")
+        self.frequency_hint.grid(row=2, column=2, sticky="w")
+        field(3, "滞后相位 / °", self.phase)
+        ttk.Label(panel, text="0～359.99°；正值表示滞后").grid(row=3, column=2, sticky="w")
+        field(4, "幅度档位 / 8", self.amplitude, ("2", "4", "6", "8"))
+        ttk.Label(panel, text="相对峰值档位，不是电压读数").grid(row=4, column=2, sticky="w")
+        self.decay_entry = field(5, "下降时间 / us", self.decay_microseconds)
+        self.decay_hint = ttk.Label(panel, text="仅用于100 Hz快降脉冲，范围1～9999 us")
+        self.decay_hint.grid(row=5, column=2, sticky="w")
+        self.double_btn = ttk.Checkbutton(panel, text="二倍频（下发频率 = 填写频率 × 2）", variable=self.double)
+        self.double_btn.grid(row=6, column=1, columnspan=2, sticky="w", pady=8)
+        self.apply_btn = ttk.Button(panel, text="应用输出", command=self.apply, state="disabled")
+        self.apply_btn.grid(row=7, column=1, sticky="w", pady=6)
+        ttk.Label(outer, textvariable=self.status, wraplength=850).pack(anchor="w")
+        ack_panel = ttk.LabelFrame(outer, text="最近一次端到端确认", padding=12)
+        ack_panel.pack(fill="x", pady=12)
+        ttk.Label(ack_panel, textvariable=self.confirmed, wraplength=850).pack(anchor="w")
+        ttk.Label(outer, text="断开连接会保持最后输出；当前协议没有停止输出命令。\nPC 请使用支持 1 Mbaud 的 3.3 V USB-TTL，TX → PB5，RX → PB4，GND 共地。", wraplength=850).pack(anchor="w")
+        self.log = tk.Text(outer, height=7, state="disabled", wrap="word")
+        self.log.pack(fill="both", expand=True, pady=(12, 0))
+        self.waveform.trace_add("write", lambda *_: self.update_controls())
         self.refresh_ports()
-        self.root.after(50, self.process_events)
+        self.update_controls()
+        root.after(50, self.process_events)
         root.protocol("WM_DELETE_WINDOW", self.close)
 
-    def refresh_ports(self) -> None:
-        ports = [item.device for item in list_ports.comports()]
+    def refresh_ports(self):
+        ports = [p.device for p in list_ports.comports()]
         self.port_box["values"] = ports
-        if ports and self.port_var.get() not in ports:
-            self.port_var.set(ports[0])
+        if ports and not self.port.get():
+            self.port.set(ports[0])
 
-    def toggle_connection(self) -> None:
-        if self.serial and self.serial.is_open:
-            self.disconnect()
-            return
-        port = self.port_var.get().strip()
-        if not port:
-            messagebox.showerror("串口", "请选择 USB-TTL 串口")
-            return
-        try:
-            self.serial = serial.Serial(port, BAUD, timeout=0.1)
-            self.serial.reset_input_buffer()
-        except serial.SerialException as exc:
-            messagebox.showerror("串口打开失败", str(exc))
-            return
-        self.stop_event.clear()
-        threading.Thread(target=self.reader, daemon=True).start()
-        self.connect_btn.config(text="断开")
-        self.capture_btn.config(state=tk.NORMAL)
-        self.status.set(f"已连接 {port}，{BAUD:,} baud")
+    def update_controls(self):
+        decay_pulse = self.waveform.get() == "100 Hz 快降脉冲"
+        if decay_pulse and self.frequency.get() != "100.000":
+            self.frequency.set("100.000")
+            self.double.set(False)
+        state = "disabled" if self.busy else "normal"
+        self.port_box.configure(state="disabled" if self.busy or self.link else "normal")
+        self.refresh_btn.configure(state=state)
+        self.connect_btn.configure(state=state, text="断开" if self.link else "连接")
+        self.apply_btn.configure(state="normal" if self.link and not self.busy else "disabled")
+        for widget in self.inputs:
+            widget.configure(state="disabled" if self.busy else ("readonly" if isinstance(widget, ttk.Combobox) else "normal"))
+        self.direction_box.configure(state="readonly" if not self.busy and self.waveform.get() == "锯齿波" else "disabled")
+        self.frequency_entry.configure(state="disabled" if self.busy or decay_pulse else "normal")
+        self.decay_entry.configure(state="normal" if decay_pulse and not self.busy else "disabled")
+        self.double_btn.configure(state="disabled" if self.busy or decay_pulse else "normal")
+        self.frequency_hint.configure(text=(
+            "固定周期 10 ms：9 ms 为 0，瞬时上升，1 ms 线性下降"
+            if decay_pulse else "精度 0.001 Hz；最终输出 250～210000 Hz"))
 
-    def disconnect(self) -> None:
-        self.stop_event.set()
-        if self.serial:
+    def run_job(self, kind, operation):
+        self.busy = True
+        self.update_controls()
+        def worker():
             try:
-                self.serial.close()
-            except serial.SerialException:
-                pass
-        self.serial = None
-        self.connect_btn.config(text="连接")
-        self.capture_btn.config(state=tk.DISABLED)
-        self.status.set("未连接")
+                self.events.put((kind, operation()))
+            except Exception as error:
+                self.events.put(("error", error))
+        threading.Thread(target=worker, daemon=True).start()
 
-    def capture(self) -> None:
-        if not self.serial or not self.serial.is_open:
+    def toggle_connection(self):
+        if self.busy:
             return
-        self.sequence = (self.sequence + 1) & 0xFF
-        try:
-            phase = float(self.phase_var.get())
-        except (ValueError, tk.TclError):
-            self.status.set("目标相位必须是0～359.99°的数字")
-            return
-        if not 0.0 <= phase < 360.0:
-            self.status.set("目标相位必须位于0～359.99°")
-            return
-        phase_cdeg = int(round(phase * 100.0))
-        mode_name = self.mode_var.get()
-        mode = 1 if mode_name != "流水线延迟" else 0
-        if mode and self.frequency_x2_var.get():
-            mode |= 0x02
-        if mode:
-            amplitude_code = {"8": 0, "2": 1, "4": 2, "6": 3}.get(
-                self.amplitude_var.get(), 0
-            )
-            mode |= amplitude_code << 2
-        try:
-            if mode_name == "自由运行DDS":
+        if self.link:
+            link = self.link
+            def disconnect():
+                link.close()
+            self.run_job("disconnected", disconnect)
+        else:
+            port = self.port.get().strip()
+            if not port:
+                self.status.set("请选择或填写串口，例如 COM18")
+                return
+            def connect():
+                link = MSPM0WaveLink(port, timeout=1.0)
                 try:
-                    frequency_khz = float(self.target_frequency_var.get())
-                except (ValueError, tk.TclError):
-                    self.status.set("自由运行频率必须是0.25～210 kHz的数字")
-                    return
-                if not 0.25 <= frequency_khz <= 210.0:
-                    self.status.set("自由运行频率必须位于0.25～210 kHz")
-                    return
-                output_frequency_khz = frequency_khz * (
-                    2.0 if self.frequency_x2_var.get() else 1.0
-                )
-                if output_frequency_khz > 210.0:
-                    self.status.set("启用2倍频后的输出必须不超过210 kHz")
-                    return
-                amplitude_code = {
-                    "8": 0, "2": 1, "4": 2, "6": 3
-                }.get(self.amplitude_var.get(), 0)
-                target_payload = struct.pack(
-                    "<IHB", int(round(output_frequency_khz * 1_000_000.0)),
-                    phase_cdeg, amplitude_code
-                )
-                self.serial.write(encode_frame(
-                    TYPE_PC_SET_TARGET, self.sequence, target_payload
-                ))
-            else:
-                self.serial.write(encode_frame(
-                    TYPE_PC_SET_MODE, self.sequence, bytes((mode,))
-                ))
-                self.serial.write(encode_frame(
-                    TYPE_PC_SET_PHASE, self.sequence,
-                    phase_cdeg.to_bytes(2, "little")
-                ))
-            if mode_name != "自由运行DDS":
-                self.serial.write(encode_frame(TYPE_PC_CAPTURE, self.sequence))
-        except serial.SerialException as exc:
-            self.status.set(f"发送失败：{exc}")
+                    link.open()
+                except Exception:
+                    link.close()
+                    raise
+                return link
+            self.status.set("正在连接串口…")
+            self.run_job("connected", connect)
+
+    def apply(self):
+        if self.busy or not self.link:
             return
-        self.capture_btn.config(state=tk.DISABLED)
-        self.status.set("正在等待 MSPM0 转发确认…")
-        self.root.after(1000, lambda sequence=self.sequence: self.capture_timeout(sequence))
-
-    def capture_timeout(self, sequence: int) -> None:
-        if sequence == self.sequence and str(self.capture_btn["state"]) == "disabled":
-            self.capture_btn.config(state=tk.NORMAL)
-            self.status.set("控制确认超时：请检查PC↔MSPM0串口和MSPM0固件")
-
-    def reader(self) -> None:
-        decoder = FrameDecoder()
         try:
-            while not self.stop_event.is_set() and self.serial:
-                block = self.serial.read(self.serial.in_waiting or 1)
-                for frame in decoder.feed(block):
-                    if (frame.frame_type == TYPE_ERROR and frame.sequence == self.sequence):
-                        try:
-                            code = decode_error(frame.payload)
-                        except ValueError as exc:
-                            self.events.put(("error", str(exc)))
-                        else:
-                            names = {1: "FPGA响应超时", 2: "FPGA帧格式错误", 3: "FPGA帧CRC错误"}
-                            self.events.put(("error", names.get(code, f"MSPM0错误码 {code}")))
-                        continue
-                    if (frame.frame_type == TYPE_PC_TARGET_ACK and
-                            frame.sequence == self.sequence):
-                        try:
-                            ack = decode_target_ack(frame.payload)
-                        except ValueError as exc:
-                            self.events.put(("error", str(exc)))
-                        else:
-                            self.events.put(("target_ack", ack))
-                        continue
-                    if frame.frame_type != TYPE_PC_RESULT:
-                        continue
-                    if frame.sequence != self.sequence:
-                        continue
-                    try:
-                        result = decode_result(frame.payload)
-                    except ValueError as exc:
-                        self.events.put(("error", str(exc)))
-                    else:
-                        self.events.put(("result", result))
-                if decoder.crc_errors:
-                    self.events.put(("crc", decoder.crc_errors))
-                    decoder.crc_errors = 0
-        except serial.SerialException as exc:
-            self.events.put(("error", f"串口错误：{exc}"))
+            waveform = {
+                "正弦波": "sine",
+                "锯齿波": "sawtooth",
+                "100 Hz 快降脉冲": "decay_pulse",
+            }[self.waveform.get()]
+            direction = "falling" if waveform == "sawtooth" and self.direction.get() == "缓降快升" else "rising"
+            frequency = float(self.frequency.get()) * (2 if self.double.get() else 1)
+            phase = float(self.phase.get())
+            amplitude = int(self.amplitude.get())
+            decay_microseconds = int(self.decay_microseconds.get())
+            encode_waveform_payload(
+                waveform, frequency, phase, amplitude, direction=direction,
+                decay_microseconds=decay_microseconds)
+        except (ValueError, OverflowError) as error:
+            self.status.set(f"参数无效：{error}")
+            return
+        link = self.link
+        self.confirmed.set("正在等待确认；此前记录不能代表当前硬件状态")
+        self.status.set("正在等待 MSPM0 / FPGA 确认…")
+        def send():
+            ack = link.set_waveform(
+                waveform, frequency, phase, amplitude, direction=direction,
+                decay_microseconds=decay_microseconds)
+            tolerance = max(0.002, frequency * 0.5e-6)
+            expected_phase = round(phase * 100)
+            expected_amp = {8: 0, 2: 1, 4: 2, 6: 3}[amplitude]
+            if (not ack.mode & 1 or ack.mode & 0x80 or
+                    (ack.mode >> 2) & 3 != expected_amp or
+                    ack.amplitude_code != expected_amp or
+                    ack.phase_centidegrees != expected_phase or
+                    abs(ack.frequency_millihz / 1000 - frequency) > tolerance):
+                raise ValueError("确认参数与请求不一致，请检查固件与硬件链路")
+            if (waveform == "decay_pulse" and
+                    ack.decay_microseconds != decay_microseconds):
+                raise ValueError("确认的下降时间与请求不一致")
+            return ack
+        self.run_job("applied", send)
 
-    def process_events(self) -> None:
+    def process_events(self):
         try:
             while True:
                 kind, value = self.events.get_nowait()
-                if kind == "result":
-                    self.latest = value  # type: ignore[assignment]
-                    self.capture_btn.config(state=tk.NORMAL)
-                    self.redraw()
-                elif kind == "target_ack":
+                self.busy = False
+                if kind == "connected":
+                    self.link = value
+                    self.confirmed.set("连接后尚未下发参数；硬件当前状态未知")
+                    self.status.set(f"已连接 {value.port}；可以应用输出")
+                elif kind == "disconnected":
+                    self.link = None
+                    self.confirmed.set("已断开；硬件可能继续保持最后输出")
+                    self.status.set("已断开连接")
+                elif kind == "applied":
                     ack = value
-                    amplitude = {0: 8, 1: 2, 2: 4, 3: 6}.get(
-                        ack.amplitude_code, "?"
-                    )
-                    self.capture_btn.config(state=tk.NORMAL)
-                    self.status.set(
-                        f"MSPM0已转发：{ack.frequency_millihz / 1000:.3f} Hz，"
-                        f"滞后{ack.phase_centidegrees / 100:.2f}°，"
-                        f"幅度{amplitude}/8"
-                    )
-                elif kind == "crc":
-                    self.status.set(f"收到错误 CRC 帧，累计新增 {value} 帧")
-                    self.capture_btn.config(state=tk.NORMAL)
+                    name = {
+                        0x00: "正弦波",
+                        0x20: "缓升快降锯齿",
+                        0x40: "100 Hz 快降脉冲",
+                        0x60: "缓降快升锯齿",
+                    }[ack.mode & 0x60]
+                    amplitude = {0: 8, 1: 2, 2: 4, 3: 6}[ack.amplitude_code]
+                    decay_text = (f"  |  下降 {ack.decay_microseconds} us"
+                                  if ack.mode & 0x60 == 0x40 else "")
+                    self.confirmed.set(f"{name}  |  {ack.frequency_millihz / 1000:.3f} Hz  |  滞后 {ack.phase_centidegrees / 100:.2f}°  |  幅度 {amplitude}/8{decay_text}")
+                    self.status.set("FPGA 已应用并确认输出参数（模拟输出请用示波器核验）")
                 else:
-                    self.status.set(str(value))
-                    self.capture_btn.config(state=tk.NORMAL)
+                    if self.link:
+                        try:
+                            self.link.close()
+                        except Exception:
+                            pass
+                        self.link = None
+                    self.confirmed.set("未确认；硬件可能已经改变输出，请重新连接并应用")
+                    self.status.set(f"操作失败：{value}")
+                self.log.configure(state="normal")
+                self.log.insert("end", f"{datetime.now():%H:%M:%S}  {self.status.get()}\n")
+                self.log.see("end")
+                self.log.configure(state="disabled")
+                self.update_controls()
         except queue.Empty:
             pass
+        if self.closing and not self.busy:
+            if self.link:
+                self.link.close()
+            self.root.destroy()
+            return
         self.root.after(50, self.process_events)
 
-    def redraw(self) -> None:
-        if self.latest is None:
-            return
-        result = self.latest
-        samples = np.asarray(result.samples, dtype=np.float64)
-        spectrum = np.asarray(result.spectrum, dtype=np.float64)
-        time_ms = np.arange(samples.size) * 1000.0 / result.sample_rate
-        freq_khz = (
-            np.arange(spectrum.size) * result.sample_rate / samples.size / 1000.0
-        )
-
-        self.time_axis.clear()
-        self.time_axis.plot(time_ms, samples, lw=0.8)
-        self.time_axis.set(
-            xlabel="时间 (ms)", ylabel="ADC code", title="4096 点时域波形"
-        )
-        self.time_axis.grid(True, alpha=0.3)
-
-        self.freq_axis.clear()
-        if self.db_var.get():
-            full_scale = max(float(np.max(spectrum)), 1.0)
-            y = 20.0 * np.log10(np.maximum(spectrum, 1.0) / full_scale)
-            ylabel = "相对幅值 (dB)"
+    def close(self):
+        self.closing = True
+        if self.busy:
+            self.status.set("正在等待当前串口操作结束后关闭…")
         else:
-            y = spectrum
-            ylabel = "幅值 (FFT code)"
-        self.freq_axis.plot(freq_khz, y, lw=0.9)
-        self.freq_axis.set(
-            xlabel="频率 (kHz)", ylabel=ylabel, title="0～110 kHz 单频频谱"
-        )
-        self.freq_axis.grid(True, alpha=0.3)
-
-        for peak in result.peaks:
-            x = peak.frequency_hz / 1000.0
-            bin_no = int(round(peak.frequency_hz * samples.size / result.sample_rate))
-            if 0 <= bin_no < y.size:
-                self.freq_axis.annotate(
-                    f"{x:.3f} kHz",
-                    (x, y[bin_no]),
-                    xytext=(5, 8),
-                    textcoords="offset points",
-                )
-
-        resolution = result.sample_rate / samples.size
-        peak_text = f"{result.peaks[0].frequency_hz/1000:.3f} kHz"
-        otr = "触发" if result.flags & 1 else "正常"
-        dac_clip = "触发" if result.flags & 2 else "正常"
-        phase_range = "超范围" if result.flags & 4 else "正常"
-        output_mode = "自由运行DDS" if result.flags & 128 else (
-            "DDS 2×" if result.flags & 64 else (
-                "DDS 1×" if result.flags & 8 else "流水线"
-            )
-        )
-        amplitude_code = (result.flags >> 8) & 0x03
-        amplitude_value = {0: 8, 1: 2, 2: 4, 3: 6}[amplitude_code]
-        amplitude_text = (
-            (f"{amplitude_value}/8固定满幅" if result.flags & 128 else
-             f"{amplitude_value}/8输入包络") if result.flags & 8 else "—"
-        )
-        frequency_text = f"FFT输入：{peak_text}"
-        if result.flags & 64:
-            frequency_text += (
-                f"，DDS输出目标≈{result.peaks[0].frequency_hz * 2 / 1000:.3f} kHz"
-            )
-        dds_lock = "已锁定" if result.flags & 16 else "未锁定"
-        dds_signal = "有信号" if result.flags & 32 else "无信号"
-        dds_state = f"{dds_lock}/{dds_signal}" if result.flags & 8 else "—"
-        self.status.set(
-            f"Fs={result.sample_rate:,} S/s，N={samples.size}，"
-            f"Δf={resolution:.3f} Hz，CRC=正常，OTR={otr}，"
-            f"DAC削顶={dac_clip}，调相={phase_range}，模式={output_mode}，"
-            f"幅度={amplitude_text}，DDS={dds_state}；{frequency_text}"
-        )
-        self.figure.tight_layout(pad=2.2)
-        self.canvas.draw_idle()
-
-    def save_csv(self) -> None:
-        if self.latest is None:
-            messagebox.showinfo("保存", "当前没有采集数据")
-            return
-        path = filedialog.asksaveasfilename(
-            defaultextension=".csv", filetypes=[("CSV", "*.csv")]
-        )
-        if not path:
-            return
-        result = self.latest
-        with open(path, "w", newline="", encoding="utf-8-sig") as handle:
-            writer = csv.writer(handle)
-            writer.writerow(["index", "time_s", "adc_code"])
-            for index, value in enumerate(result.samples):
-                writer.writerow([index, index / result.sample_rate, value])
-
-    def close(self) -> None:
-        self.disconnect()
-        self.root.destroy()
+            if self.link:
+                self.link.close()
+            self.root.destroy()
 
 
 if __name__ == "__main__":

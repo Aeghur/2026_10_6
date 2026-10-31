@@ -151,15 +151,20 @@ UART4-M1、PB21/PB22接线及供图像程序调用的Python接口见
 [`radxa/README.md`](radxa/README.md)。
 
 自由运行频率范围为250～210000 Hz；`phase`沿用系统定义，正值表示输出滞后。
+新增固定100 Hz快降脉冲：周期保持10 ms，下降时间可在1～9999 us内独立设置，
+其余时间输出0。图形窗口选择该波形后会锁定频率、启用下降时间输入并禁用二倍频。
 界面的“2倍频”会在下发前将填写频率乘2，乘2后的最终输出须不超过210 kHz；
 例如填写105 kHz并启用2倍频，将向FPGA下发210 kHz。
-旧正弦命令保留协议类型`0x13`。新波形命令采用`0x14`，8字节小端载荷依次为
+旧正弦命令保留协议类型`0x13`。新波形命令采用`0x14`；普通波形的8字节小端载荷依次为
 `waveform:u8`、`frequency_mHz:u32`、`phase_cdeg:u16`、
-`amplitude_code:u8`，其中波形编码`0/1`为正弦/锯齿。幅度编码`0/1/2/3`分别表示
+`amplitude_code:u8`，波形编码`0/1/2/3`分别为正弦、正向锯齿、反向锯齿、
+固定100 Hz快降脉冲。幅度编码`0/1/2/3`分别表示
 `8/2/4/6`档，设计成0表示满幅以保持原有模式兼容。FPGA正确接收、校验并应用
-参数后，先向MSPM0返回`0x84 OUTPUT_ACK`；MSPM0只有收到该确认才向PC返回
-`0x93`确认帧，8字节载荷为`frequency_mHz:u32`、`phase_cdeg:u16`、
+参数后，先向MSPM0返回`0x84 OUTPUT_ACK`；快降脉冲请求追加`decay_us:u16`，共10字节。
+MSPM0只有收到该确认才向PC返回`0x93`确认帧；普通波形8字节载荷为
+`frequency_mHz:u32`、`phase_cdeg:u16`、
 `amplitude_code:u8`、`mode:u8`；`mode`位5为1表示锯齿波，不再返回大体积FFT结果帧。
+快降脉冲确认再追加`decay_us:u16`，客户端必须核对下降时间。
 
 FPGA的`0x84`确认帧格式为`A5 5A 84 seq 00 00 crc_lo crc_hi`，其中`seq`
 必须与本次`0x04 SET_OUTPUT`命令一致。MSPM0等待FPGA确认失败时，向PC返回
@@ -216,8 +221,10 @@ python dpll_control.py --port COM6 --phase 0
 | MSPM0→Radxa | MSPM0 PB21/UART1_TX | Radxa PIN 15/UART4_RX_M1 | 1 Mbaud |
 | Radxa→MSPM0 | Radxa PIN 11/UART4_TX_M1 | MSPM0 PB22/UART1_RX | 1 Mbaud |
 
-主机串口默认使用PB21/PB22。将`msp_uart_link.h`里的
-`HOST_UART_USE_RADXA_PINS`改为0并重新编译，可恢复PC USB-TTL使用的PB4/PB5；
+当前固件默认使用Radxa的PB21 TX/PB22 RX，`HOST_UART_USE_RADXA_PINS=1`。
+PC推荐运行`python radxa_scope.py`，通过192.168.137.2上的Radxa控制，详见
+[RADXA_NETWORK_GUI.md](RADXA_NETWORK_GUI.md)，不需要改变接线或烧录固件。
+若单独使用PC USB-TTL直连，仍沿用PB4 TX/PB5 RX，并须改为0后编译烧录；
 上层协议、波特率和PC脚本无需改变。
 
 MSPM0G3519的UART1位于PD0，BUSCLK为40 MHz，采用`2 + 32/64`分频和16倍
@@ -272,3 +279,9 @@ DAC回到标定零点，避免保持未知波形。
 到顶后直接回落，不另设回扫时间。新增回归：
 `iverilog -g2012 -s tb_dds_free_run -o tb_free.out sine_rom_1024.v zero_crossing_dds.v tb_dds_free_run.v`，
 再运行`vvp tb_free.out`。
+
+
+锯齿方向可通过`wave_control.py --waveform sawtooth --direction rising|falling`
+或`set_sawtooth(..., direction="falling")`控制。默认rising兼容旧命令；
+falling翻转数字锯齿方向，用于缓降快升或补偿模拟输出反相。
+协议细节见`radxa/WAVEFORM_CONTROL_PROTOCOL.md`。

@@ -11,7 +11,7 @@
 
 static bool normalizeFrequency(uint32_t *frequencyMilliHz)
 {
-    const uint32_t minimumMilliHz = MEASUREMENT_MIN_FREE_RUN_HZ * 1000UL;
+    const uint32_t minimumMilliHz = 100UL * 1000UL;
     const uint32_t maximumMilliHz = MEASUREMENT_MAX_FREE_RUN_HZ * 1000UL;
 
     /* Free-run commands are exact targets, not FFT-bin estimates. */
@@ -56,6 +56,19 @@ static uint32_t actualFrequencyMilliHz(uint32_t phaseStep)
         ((product % turn) * 1000ULL + turn / 2U) / turn);
 }
 
+static void calculateDecayParameters(
+    uint16_t decayMicroseconds, uint16_t *decayStart,
+    uint32_t *decayScaleQ16)
+{
+    uint32_t width =
+        ((uint32_t) decayMicroseconds * 65535UL + 5000UL) / 10000UL;
+    if (width == 0U)
+        width = 1U;
+    *decayStart = (uint16_t) (65535UL - width);
+    *decayScaleQ16 = (uint32_t)
+        ((((uint64_t) 32767U << 16) + width / 2U) / width);
+}
+
 int main(void)
 {
     uint16_t targetPhase = MEASUREMENT_DEFAULT_PHASE_CDEG;
@@ -64,6 +77,8 @@ int main(void)
     uint32_t requestedFrequencyMilliHz;
     uint8_t requestedAmplitudeCode = 0U;
     uint8_t requestedWaveform = 0U;
+    uint16_t targetDecayMicroseconds = 1000U;
+    uint16_t requestedDecayMicroseconds = 1000U;
     uint8_t targetMode = MEASUREMENT_MODE_DDS;
     uint8_t requestedMode;
     uint8_t targetSequence = 0U;
@@ -71,6 +86,8 @@ int main(void)
     uint32_t activePhaseStep = 0xFFFFFFFFUL;
     uint32_t activePhaseLag = 0xFFFFFFFFUL;
     uint8_t activeMode = 0xFFU;
+    uint16_t activeDecayStart = 0xFFFFU;
+    uint32_t activeDecayScaleQ16 = 0xFFFFFFFFUL;
     bool controlChanged = true;
     bool targetAckPending = false;
 
@@ -94,14 +111,19 @@ int main(void)
         if (PC_Link_TakeTargetRequest(
                 &targetSequence, &requestedFrequencyMilliHz,
                 &requestedPhase, &requestedAmplitudeCode,
-                &requestedWaveform)) {
+                &requestedWaveform, &requestedDecayMicroseconds)) {
             targetFrequencyMilliHz = requestedFrequencyMilliHz;
             targetPhase = requestedPhase;
+            targetDecayMicroseconds = requestedDecayMicroseconds;
             targetMode = (uint8_t) (
                 MEASUREMENT_MODE_DDS | MEASUREMENT_MODE_FREE_RUN |
                 (requestedAmplitudeCode << MEASUREMENT_MODE_AMPLITUDE_SHIFT) |
-                (requestedWaveform != 0U ?
-                 MEASUREMENT_MODE_WAVEFORM_SAW : 0U));
+                (requestedWaveform == 1U || requestedWaveform == 2U ?
+                 MEASUREMENT_MODE_WAVEFORM_SAW : 0U) |
+                (requestedWaveform == 2U ?
+                 MEASUREMENT_MODE_SAW_REVERSE : 0U) |
+                (requestedWaveform == 3U ?
+                 MEASUREMENT_MODE_WAVEFORM_DECAY : 0U));
             controlChanged = true;
             targetAckPending = true;
         }
@@ -109,10 +131,14 @@ int main(void)
         if (controlChanged) {
             uint32_t phaseStep;
             uint32_t phaseLag;
+            uint16_t decayStart;
+            uint32_t decayScaleQ16;
             FPGA_CaptureStatus fpgaStatus = FPGA_CAPTURE_OK;
             uint32_t commandFrequency =
                 (targetMode & MEASUREMENT_MODE_FREE_RUN) != 0U ?
                 targetFrequencyMilliHz : 0U;
+            calculateDecayParameters(
+                targetDecayMicroseconds, &decayStart, &decayScaleQ16);
 
             if (calculateDDSWords(
                     commandFrequency, targetPhase, &phaseStep, &phaseLag)) {
@@ -122,14 +148,19 @@ int main(void)
                 if (targetAckPending ||
                     activeMode != targetMode ||
                     activePhaseStep != phaseStep ||
-                    activePhaseLag != phaseLag) {
+                    activePhaseLag != phaseLag ||
+                    activeDecayStart != decayStart ||
+                    activeDecayScaleQ16 != decayScaleQ16) {
                     fpgaSequence++;
                     fpgaStatus = FPGA_Capture_SetOutput(
-                        fpgaSequence, targetMode, phaseStep, phaseLag);
+                        fpgaSequence, targetMode, phaseStep, phaseLag,
+                        decayStart, decayScaleQ16);
                     if (fpgaStatus == FPGA_CAPTURE_OK) {
                         activeMode = targetMode;
                         activePhaseStep = phaseStep;
                         activePhaseLag = phaseLag;
+                        activeDecayStart = decayStart;
+                        activeDecayScaleQ16 = decayScaleQ16;
                     }
                 }
                 if (targetAckPending) {
@@ -137,7 +168,8 @@ int main(void)
                         PC_Link_SendTargetAck(
                             targetSequence,
                             actualFrequencyMilliHz(phaseStep),
-                            targetPhase, requestedAmplitudeCode, targetMode);
+                            targetPhase, requestedAmplitudeCode, targetMode,
+                            requestedDecayMicroseconds);
                     else
                         PC_Link_SendError(
                             targetSequence, (uint16_t) fpgaStatus);
