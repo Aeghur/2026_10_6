@@ -1,0 +1,57 @@
+{
+  "description": "Current camera grid and HSV extraction for the hollow saw experiment",
+  "full_grid_corners": [
+    [
+      157,
+      63
+    ],
+    [
+      1158,
+      40
+    ],
+    [
+      1176,
+      708
+    ],
+    [
+      173,
+      729
+    ]
+  ],
+  "grid_dimensions_div": [
+    12,
+    8
+  ],
+  "manual_exposure": 80,
+  "manual_gain": 0,
+  "hsv_saturation_max": 120,
+  "hsv_value_min": 240,
+  "internal_saw_hz": 10000,
+  "full_ramp_height_px": 630.6859108054118,
+  "reference_frame_size": [
+    1280,
+    720
+  ],
+  "full_ramp_height_note": "Empirical calibration from declared 66600 Hz reference, assuming scan durations accurate: 640 px × 0.9854467356 = 630.685911 px. Equivalent 3.941787 Vpp is not a voltage measurement; hardware remains nominal 4 Vpp.",
+  "ramp_span_volts": 4.0,
+  "y_volts_per_division": 0.5,
+  "nominal_ramp_span_volts": 4.0,
+  "effective_ramp_span_volts": 3.941786942533824,
+  "vertical_scale_calibration": {
+    "reference_frequency_hz": 66600,
+    "source_case": "/home/radxa/vision_sorter/artifacts/diagnostics/gated_real_20261031_091809",
+    "reference_fit_frequencies_hz": [
+      67605.0,
+      67670.0,
+      67465.0
+    ],
+    "median_reference_fit_hz": 67605.0,
+    "original_height_px": 640.0,
+    "correction_factor": 0.985446735633456,
+    "analytic_initial_height_px": 630.4859108054138,
+    "selection_method": "Minimize mean known-frequency fit error across three reference phases through actual preprocessing",
+    "scan_duration_assumed_correct": true,
+    "independent_voltage_measurement": false,
+    "camera_or_y_scale_changes_require_recalibration": true
+  }
+}

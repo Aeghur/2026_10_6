@@ -1,0 +1,19 @@
+{
+  "package": "gated_ramp_training_v1",
+  "files": {
+    "INSTALL.cmd": "dbe8f0f39a52dcefbe3df84caa3bcea218de1499fbcd375873bd291fb5dc42a1",
+    "START.cmd": "c3ccfc41767aeab6dfd2cf8997a1c3fdfcb496e4c81ca54e2ec65a9797b41fc6",
+    "VALIDATION.json": "d3deb84c96da80a546936d823d281885dfeaf382b22a8098d23348b0593d65de",
+    "gated.html": "5c09574c1dea30ecd9f1bfbbe20a84fc885f244affd318b40e409e5903118e16",
+    "gated_frequency.py": "8627f5eade4c75e88eb633308be0337078e93553c281e08990d03f3dd0f6fc29",
+    "requirements.txt": "962c4e6be7e548bb1a9440c557fce2deab707987e246f72a7347cab6fb6699eb",
+    "test_gated.py": "abfd568069aced43b27f666ff6a2ef9b38f93b1d407a3f0c523cd1a617b6fb0d",
+    "test_gated_frontend.cjs": "0c14b969659a54b99154350c4e9c0d06c761f5affb932862e41aedf537c7b03b",
+    "train_gated.cmd": "d896f036c3d1a26f0b106e6b61518aa36a28061c26087d83ba3f32f8d78cc7e1",
+    "train_gated.py": "80ba3c86e676ebd4140f1142907f345bc3bdc6b6e127eab386a56ac11d347f9b",
+    "validation/90100hz_50us.png": "5a51dbec17653f5b095767db77308f0e8b65c0b9a497fa9f1a9cfa893b1a9d88",
+    "validation/frozen_check.json": "c8818518464d5c78710242c9d50d0bf40f6ef75084665326139cf11c8873924d",
+    "使用说明.txt": "47f411487b16940cd695e045bf9b491c4ec67e899422b68a52fcabf3684e9b04",
+    "技术说明.txt": "c301be9c6448e791b84ddb86875c057df5a8599fcb00cf09fbc4277d6c16fd91"
+  }
+}

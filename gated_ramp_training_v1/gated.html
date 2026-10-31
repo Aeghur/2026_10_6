@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>固定10 ms重复 · 门控扫描测频实验</title>
+<style>
+:root{color-scheme:dark;font:15px/1.6 system-ui;background:#0d1723;color:#dce7f5}body{max-width:1460px;margin:auto;padding:24px}h1{font-size:28px;margin-bottom:4px}h2{font-size:19px}p{color:#9fb4cc}section,.card{background:#162535;border:1px solid #30465b;border-radius:12px;padding:20px;margin:18px 0}button,input{font:inherit;color:inherit;border:1px solid #49647d;border-radius:6px;padding:9px;background:#20374c}button{cursor:pointer;margin:5px}button.primary{background:#196b5b}button.stop{background:#773c44}button:disabled{opacity:.45;cursor:default}.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}label{color:#a8c1d9}input{display:block;width:90%;margin-top:4px}.note{border-left:3px solid #ebbc65;padding-left:12px}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px}.card{margin:0}.big{font-size:28px;color:#78e2c0}#error{color:#ff9e9e;white-space:pre-wrap}#status{color:#8cdded}progress{width:100%;height:10px}.frames{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.frames img{width:100%;max-width:384px;image-rendering:auto;background:black}.caption{font-size:13px;color:#acc1d5}table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}td,th{text-align:left;padding:8px;border-bottom:1px solid #30465b}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}svg{width:100%;height:180px;background:#101d2b}#run{overflow-wrap:anywhere;font-size:12px;color:#90a7be}@media(max-width:800px){body{padding:12px}.frames{grid-template-columns:repeat(2,1fr)}.scroll{overflow:auto}}
+</style>
+<h1>固定10 ms重复 · 门控扫描测频实验</h1>
+<p>电脑仿真 / 图像输入 / 100 Hz候选网格 / 学习候选排序。启动后保持空闲，由你开始和停止。</p>
+<section>
+<p class="note">每10 ms：保持低端 → 在已知延迟处匀速上升 → 保持高端 → 快速复位。有效上升时间与重复周期独立。探测期间必须保持同一个10 ms计时基准，调整窗口或延迟时不能重置它。</p>
+<svg viewBox="0 0 1000 130" role="img" aria-label="门控扫描波形"><path d="M30 105 H170 L215 25 H930 V105 H980" stroke="#78e2c0" stroke-width="3" fill="none"/><text x="45" y="85" fill="#a9bfd5">等待已知延迟</text><text x="225" y="65" fill="#a9bfd5">上升结束后保持端点电压</text><text x="160" y="125" fill="#ebbc65">有效扫描 Tₛ</text><text x="660" y="110" fill="#a9bfd5">完整重复周期固定10 ms</text></svg>
+<details><summary>参数设置（首次先用默认值）</summary><div class="fields" id="fields"></div></details>
+<p class="note">独立测试使用未参与训练/验证的随机场景；模型只读取图像提取的特征与扫描时序。默认加入±5 ppm相对时钟误差、曝光期间多次扫描、1–3像素线宽、模糊和端点保持亮线。该仿真尚未用真实示波器标定。</p>
+<button id="audit">只检查观测，不训练</button><button id="train" class="primary">开始 / 继续训练</button><button id="evaluate">独立测试 best.pt</button><button id="stop" class="stop" disabled>停止并保存</button>
+<div id="status" role="status">正在连接本地服务…</div><div id="error" role="alert"></div><progress id="progress" max="1" value="0"></progress><div id="run"></div>
+<p>训练时限从观测缓存生成完成后开始。更改采集条件请使用新目录；继续训练自动读取原条件。测试不会更新权重。此页面不会连接开发板或摄像头。</p>
+</section>
+<div class="metrics"><div class="card">累计完整轮数<div class="big" id="epoch">—</div></div><div class="card">验证 · 精确100 Hz档位<div class="big" id="validation">—</div></div><div class="card">验证 · 物理基线<div class="big" id="baseline">—</div></div><div class="card">独立测试 · 精确档位<div class="big" id="test">—</div></div><div class="card">测试 · 候选覆盖率<div class="big" id="coverage">—</div></div></div>
+<section><h2>训练趋势</h2><p>绿线：学习排序；金线：相同图像的物理拟合基线。模型长期低于基线时应检查数据和排序方法，不能仅靠延长训练。</p><svg id="chart" viewBox="0 0 1000 180" role="img" aria-label="验证准确率趋势"></svg></section>
+<section><h2>有限像素观测与扫描时序</h2><div id="example"></div><p>前三张：50 / 250 / 2000 μs粗测；后三张：根据粗测选择上升时间，并改变已知延迟。上升从下向上，顶部亮线来自保持阶段；拟合时排除端点6像素。真实频率只供仿真评分显示。</p><div id="frames" class="frames"></div></section>
+<section><h2>观测检查</h2><div class="scroll"><table><thead><tr><th>仿真真值</th><th>粗测候选</th><th>有效上升时间</th><th>联合拟合</th><th>拟合误差</th></tr></thead><tbody id="auditrows"></tbody></table></div></section>
+<section><h2>独立测试详情</h2><p>Top1为精确100 Hz档位命中率，Top5为前五候选覆盖率。候选阶段遗漏的真值计为失败；此功能只验证测频，不代表幅度、相位、10秒控制或5秒保持已通过。</p><pre id="details">尚未测试</pre></section>
+<section><h2>近期验证记录</h2><div class="scroll"><table><thead><tr><th>轮数</th><th>损失</th><th>模型Top1</th><th>物理基线</th><th>Top5</th><th>候选覆盖</th></tr></thead><tbody id="history"></tbody></table></div></section>
+<script>
+const $=id=>document.getElementById(id);
+const definitions={minimum_hz:['最低频率 Hz',1000],maximum_hz:['最高频率 Hz',100000],clock_ppm:['相对时钟误差上限 ±ppm',5],exposure_ms:['显示/相机有效积分 ms',60],command_gap_ms:['相邻命令间隔 ms（≥积分时间）',120],line_width:['最大线宽 px',3],seed:['随机种子',20261031],train_cases:['训练场景数',1024],validation_cases:['验证场景数',256],test_cases:['独立测试场景数',512],epochs:['目标累计轮数',10000],batch_size:['批大小',32],learning_rate:['学习率',.001],max_minutes:['本次训练分钟（0不限）',60]};
+const runtime=new Set(['epochs','batch_size','learning_rate','max_minutes']);let config=null,initialized=false,lastPreview='',pending=false;
+for(const [key,[name,value]] of Object.entries(definitions)){const label=document.createElement('label');label.textContent=name;const input=document.createElement('input');input.type='number';input.id='cfg_'+key;input.value=value;input.step=['learning_rate','clock_ppm','exposure_ms','command_gap_ms','max_minutes'].includes(key)?'any':'1';label.append(input);$('fields').append(label);}
+const percent=x=>typeof x==='number'?(100*x).toFixed(2)+'%':'—';
+function cells(parent,values){const tr=document.createElement('tr');for(const v of values){const td=document.createElement('td');td.textContent=String(v);tr.append(td);}parent.append(tr);}
+function render(s){
+ config=s.config;if(!initialized){for(const k of Object.keys(definitions))$('cfg_'+k).value=config[k];initialized=true;}
+ const busy=s.running||pending;for(const action of ['audit','train','evaluate'])$(action).disabled=busy;$('stop').disabled=!s.running;
+ for(const k of Object.keys(definitions))$('cfg_'+k).disabled=busy;
+ $('status').textContent=s.message+' · '+s.state;$('error').textContent=s.error||'';$('run').textContent='结果目录：'+s.run;
+ $('progress').value=s.progress||0;$('epoch').textContent=s.epoch;$('validation').textContent=percent(s.validation?.top1);$('baseline').textContent=percent(s.validation?.baseline_top1);$('test').textContent=percent(s.test?.top1);$('coverage').textContent=percent(s.test?.candidate_coverage);
+ if(s.example)$('example').textContent=`仿真真值 ${s.example.truth_hz} Hz；粗测 ${s.example.coarse_hz} Hz；有效上升 ${s.example.active_us} μs；联合拟合 ${s.example.baseline_hz} Hz；共 ${s.example.commands} 次扫描设置。`;
+ const mark=JSON.stringify(s.example)+s.preview?.[0]?.image.slice(-60);if(mark!==lastPreview){lastPreview=mark;$('frames').replaceChildren();for(const p of s.preview||[]){const box=document.createElement('div'),img=document.createElement('img'),cap=document.createElement('div');img.src=p.image;img.alt='门控扫描的仿真相机图像';cap.className='caption';cap.textContent=`上升 ${p.active_us} μs / 延迟 ${p.delay_us} μs / 超帧序号 ${p.frame_index}`;box.append(img,cap);$('frames').append(box);}}
+ $('auditrows').replaceChildren();for(const r of s.audit||[])cells($('auditrows'),[r.truth_hz+' Hz',r.coarse_hz+' Hz',r.active_us+' μs',r.baseline_hz+' Hz',r.fit_error.toFixed(6)]);
+ if(s.test)$('details').textContent=JSON.stringify(s.test,null,2);
+ const history=(s.history||[]).filter(r=>r.stage==='validation');$('history').replaceChildren();for(const r of history.slice(-15).reverse())cells($('history'),[r.epoch,r.loss?.toFixed(4)??'—',percent(r.top1),percent(r.baseline_top1),percent(r.top5),percent(r.candidate_coverage)]);
+ $('chart').replaceChildren();for(const [key,color] of [['top1','#78e2c0'],['baseline_top1','#ebbc65']]){const p=document.createElementNS('http://www.w3.org/2000/svg','polyline');p.setAttribute('points',history.map((r,i)=>`${20+i*960/Math.max(1,history.length-1)},${165-150*r[key]}`).join(' '));p.setAttribute('fill','none');p.setAttribute('stroke',color);p.setAttribute('stroke-width','2');$('chart').append(p);}
+}
+async function poll(){try{const r=await fetch('/api/state');if(!r.ok)throw Error('读取状态失败');render(await r.json());}catch(e){$('error').textContent='连接失败：'+e.message+'；确认CMD窗口仍在运行。';}finally{setTimeout(poll,1200);}}
+async function action(name){if(pending)return;pending=true;try{if(!config)throw Error('请等待本地服务连接');const payload={...config};for(const k of Object.keys(definitions)){const v=Number($('cfg_'+k).value);if($('cfg_'+k).value===''||!Number.isFinite(v))throw Error('参数不能为空：'+k);payload[k]=v;}const r=await fetch('/api/'+name,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(name==='stop'?{}:payload)});const data=await r.json();if(!r.ok)throw Error(data.error||'请求失败');$('error').textContent='';}catch(e){$('error').textContent=e.message;}finally{pending=false;}}
+for(const name of ['audit','train','evaluate','stop'])$(name).onclick=()=>action(name);poll();
+</script></html>

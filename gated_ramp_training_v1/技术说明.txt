@@ -1,0 +1,92 @@
+﻿固定10 ms重复、短上升、端点保持：电脑测频仿真与训练
+==================================================
+
+启动（CMD）：
+cd /d "D:\lissajous\gated_ramp_training_v1"  （改成实际解压目录）
+train_gated.cmd --run gated_runs\fixed_10ms_v1 --max-minutes 60
+
+浏览器打开 http://127.0.0.1:8776/
+程序默认空闲，不会自动训练，也不会连接硬件。
+建议先点“只检查观测”，查看26k/81k/90.1k等案例，再开始训练。
+训练一至两小时：--max-minutes 60 或 120。网页中也可改“本次训练分钟”。
+时间从缓存生成完成后开始计；缓存生成可中止，未完成的缓存不会被使用。
+网页“停止并保存”或CMD Ctrl+C都会保存已完成的训练批次。
+重复相同启动命令，点击继续训练，恢复 latest.pt 的模型、优化器、轮数和批次位置。
+独立测试使用 best.pt、新的测试种子，生成 test_result.json；不会更新权重。
+
+依赖沿用 requirements.txt：numpy、Pillow、torch。
+先运行 INSTALL.cmd；启动器优先使用包内 .venv\Scripts\python.exe。
+无此环境时：py -3 -m pip install -r requirements.txt
+
+文件：
+gated_frequency.py：波形仿真、图像提取、候选拟合、学习排序模型。
+train_gated.py / train_gated.cmd：训练、继续、审查、独立测试、HTTP服务。
+gated.html：本地前端。
+gated_runs\fixed_10ms_v1：latest.pt、best.pt、metrics.jsonl、status.json、观测缓存。
+旧 edge/hybrid 模型与训练目录不变；本方案从新模型开始，不加载旧模型。
+
+采集策略：
+完整超帧固定10000 us。在超帧开始保持低端，到delay_us时开始线性上升，
+active_us后保持高端，下一超帧开始快速下降到低端。
+复位近似瞬时，仿真不额外画回扫线；保持高端产生顶部亮线，绝非省略保持阶段。
+第一阶段用50、250、2000 us上升时间各测一次；像素拟合生成粗测候选。
+第二阶段从50/100/200/500/1000/2000/4000 us选择接近4周期的上升时间，
+分别使用0、1700、4300 us延迟。总计六个命令设置。
+相邻命令默认120 ms，积分默认60 ms，命令在10 ms边界生效，积分来自新设置。
+前一设置的残留消失后才采图；实际硬件/示波器必须验证这种清除和等待条件。
+改变时序时保持同一个超帧计数器连续，不能重置10 ms基准。
+取帧与已知超帧序号关联；不能仅使用Windows收到图片的时间替代硬件计时。
+
+名义输入为100 Hz整数倍，范围默认1k..100k。每个10 ms超帧名义相位重复；
+仿真另加相对时钟偏差，连续时间贯穿所有命令和积分扫描，没有逐帧重置相位。
+默认±5 ppm；可改为20/50/100 ppm做压力测试。它是相对误差，包括源与DAC。
+改变误差范围、曝光、数据数、频率范围、种子等条件，须使用新的 --run 目录。
+重启时已保存模型会恢复原数据条件；只有轮数、批大小、学习率、时间上限可直接改。
+
+图像和推断：
+384x384灰度有限像素图；锯齿低端y=345、高端y=38，信号沿X变化。
+端点各排除6像素。图像有1..最大线宽的随机线宽、噪声、模糊、网格、保持亮线。
+先按已知行位置提取曲线横向质心，再对100 Hz候选拟合sin/cos/DC。
+粗测来自图像，未知源的相位与幅度只作拟合的干扰参数，不作为推断输入。
+联合拟合共享跨图像相位，并搜索9档相对时钟偏差；其网格近似可能成为瓶颈。
+候选频率来自图像前12个种子及邻近3档；候选遗漏单独统计，模型不能凭空恢复。
+Ranker是共享候选评分小网络，通过监督学习排序；不是原先的强化学习控制器。
+输入特征是图像拟合误差、拟合幅度、图像密度和候选有效标记。
+真实频率仅供渲染、训练损失和评估。渲染器不会把内部矢量曲线直接传给推断。
+学习模型与固定物理基线始终比较；不能承诺训练一定改善已经很好的基线。
+缓存以条件摘要命名，训练、验证、测试使用不同随机种子和独立场景。
+验证选 best.pt，测试仅评价。相同测试目录的重复测试是同一测试集，不是新的独立证据。
+
+推断接口（未来接硬件）：
+from gated_frequency import Scan, extract, baseline, Config, Ranker
+observations = [(rectified_pil_image, Scan(active_us, delay_us, frame_index)), ...]
+features = extract(observations, config.grid, config.clock_ppm)
+baseline_hz = config.grid[baseline(features).argmin()]
+模型使用 Ranker().load_state_dict(torch.load(...,weights_only=True)['model'])，
+再对 torch.from_numpy(features)[None] 调用模型并取argmax。
+extract只读取位图和公开时序，返回候选特征，不读取Scene/频率真值。
+目前接口只给候选排序，没有经过实测校准的成功置信度，不应直接驱动最终锁定。
+
+适用边界：
+这是光学过程的近似仿真，不是DSO-X 2022A的真实刷新/采样模型。
+未模拟残留旧设置、滚动快门、自动曝光、严重透视误差、非线性DAC、随机相位断点。
+画面经已有透视/镜头校正后，还必须把锯齿端点标到约定像素；位置错误会改变测频。
+端点保持亮线可能产生真实泛光，低占空比可能让上升线太暗；应先拍照验证。
+仿真假设有效上升线仍可见，尚未按占空比计算示波器亮度或相机光子噪声。
+时钟漂移过大或完整显示积分太长仍会叠成多分支；增加训练不会恢复已丢失的信息。
+此实验只解决频率候选；没有验证幅度/相位闭环、10秒完成或稳定保持5秒。
+
+本次交付的有界检查（非训练结果）：
+6项单元/流程测试和Node前端交互检查通过。
+流程测试中禁用了 optimizer.step；没有启动正式训练或持久网页服务。
+同一组24个随机频率、不同相对时钟误差的冻结物理基线：
+0、±5、±20 ppm各24/24；±50 ppm为19/24，失败案例相差100 Hz。
+这些是小样本仿真检查，不能当作全范围实测准确率或模型训练成绩。
+详细冻结结果见 validation\frozen_check.json。
+
+命令行模式（由你自行启动）：
+train_gated.cmd --run gated_runs\fixed_10ms_v1 --headless audit
+train_gated.cmd --run gated_runs\fixed_10ms_v1 --headless train --max-minutes 120
+train_gated.cmd --run gated_runs\fixed_10ms_v1 --headless evaluate
+压力测试另建目录：
+train_gated.cmd --run gated_runs\clock50 --clock-ppm 50 --max-minutes 60

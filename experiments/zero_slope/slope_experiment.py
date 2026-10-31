@@ -144,7 +144,7 @@ def verify_single_trace(image, scan_hz, expected_cycles):
     return verify(image, scan_hz, expected_cycles, geometry)
 
 
-def main():
+def legacy_main():
     ap=argparse.ArgumentParser()
     ap.add_argument('--hardware',action='store_true')
     ap.add_argument('--image',type=Path)
@@ -224,5 +224,14 @@ def main():
     finally:
         if camera is not None:camera.close()
         save();print('ARTIFACTS',out,flush=True)
+
+def main():
+    if '--legacy-scan' in sys.argv:
+        sys.argv.remove('--legacy-scan')
+        legacy_main()
+    else:
+        from slope_image_cli import main as image_main
+        image_main()
+
 
 if __name__=='__main__':main()

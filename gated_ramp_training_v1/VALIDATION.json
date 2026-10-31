@@ -1,0 +1,20 @@
+{
+  "package": "gated_ramp_training_v1",
+  "formal_training_started": false,
+  "included_weights": false,
+  "checks": {
+    "archive_and_manifest": "passed",
+    "allowlist_no_user_data": "passed",
+    "portable_documentation": "passed",
+    "extracted_package_six_tests": "passed; optimizer updates disabled",
+    "frontend_idle_buttons_payload": "passed"
+  },
+  "runtime": {
+    "python": "3.12.14 (main, Aug 25 2026, 14:01:42) [MSC v.1944 64 bit (AMD64)]",
+    "dependencies": {
+      "numpy": "2.3.5",
+      "Pillow": "12.3.0",
+      "torch": "2.14.1+cpu"
+    }
+  }
+}

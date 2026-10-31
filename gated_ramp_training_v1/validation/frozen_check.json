@@ -1,0 +1,70 @@
+[
+  {
+    "clock_ppm": 0,
+    "count": 24,
+    "baseline_top1": 1.0,
+    "candidate_coverage": 1.0,
+    "wrong": [],
+    "seconds": 2.734000000000151
+  },
+  {
+    "clock_ppm": 5,
+    "count": 24,
+    "baseline_top1": 1.0,
+    "candidate_coverage": 1.0,
+    "wrong": [],
+    "seconds": 2.9849999999999
+  },
+  {
+    "clock_ppm": 20,
+    "count": 24,
+    "baseline_top1": 1.0,
+    "candidate_coverage": 1.0,
+    "wrong": [],
+    "seconds": 2.8279999999999745
+  },
+  {
+    "clock_ppm": 50,
+    "count": 24,
+    "baseline_top1": 0.7916666666666666,
+    "candidate_coverage": 1.0,
+    "wrong": [
+      {
+        "truth_hz": 77600,
+        "predicted_hz": 77500,
+        "coarse_hz": 77600,
+        "active_us": 50.0,
+        "commands": 6
+      },
+      {
+        "truth_hz": 56000,
+        "predicted_hz": 56100,
+        "coarse_hz": 56000,
+        "active_us": 100.0,
+        "commands": 6
+      },
+      {
+        "truth_hz": 88400,
+        "predicted_hz": 88500,
+        "coarse_hz": 88400,
+        "active_us": 50.0,
+        "commands": 6
+      },
+      {
+        "truth_hz": 80100,
+        "predicted_hz": 80000,
+        "coarse_hz": 80100,
+        "active_us": 50.0,
+        "commands": 6
+      },
+      {
+        "truth_hz": 87400,
+        "predicted_hz": 87500,
+        "coarse_hz": 87400,
+        "active_us": 50.0,
+        "commands": 6
+      }
+    ],
+    "seconds": 2.9529999999999745
+  }
+]
