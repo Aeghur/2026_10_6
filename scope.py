@@ -109,7 +109,7 @@ class ScopeApp:
         self.decay_entry.configure(state="normal" if decay_pulse and not self.busy else "disabled")
         self.double_btn.configure(state="disabled" if self.busy or decay_pulse else "normal")
         self.frequency_hint.configure(text=(
-            "固定周期 10 ms：9 ms 为 0，瞬时上升，1 ms 线性下降"
+            "固定100 Hz：保持负峰值，瞬升正峰值后按设定时间下降"
             if decay_pulse else "精度 0.001 Hz；最终输出 250～210000 Hz"))
 
     def run_job(self, kind, operation):

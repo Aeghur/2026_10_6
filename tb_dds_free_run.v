@@ -80,29 +80,29 @@ module tb_dds_free_run;
         force dut.output_phase=32'h00000000;
         @(posedge clk); #1;
         if(dut.saw_sample_pipe !== 16'sd32767) $fatal(1,"reverse wrap");
-        // The decay pulse is zero for 90%, jumps to positive peak at 90%,
-        // and falls linearly to zero over the final 10% of the 100 Hz cycle.
+        // The decay pulse holds at negative peak for 90%, jumps to positive
+        // peak, and falls back to negative peak over the final 10%.
         reverse=0; saw=0; decay=1;
         force dut.output_phase=32'he6640000;
-        @(posedge clk); #1;
-        if(dut.decay_sample_pipe !== 16'sd0) $fatal(1,"decay before 90 percent");
+        repeat (2) @(posedge clk); #1;
+        if(dut.decay_sample_pipe !== -16'sd32768) $fatal(1,"decay low hold");
         force dut.output_phase=32'he6650000;
-        @(posedge clk); #1;
-        if(dut.decay_sample_pipe < 16'sd32760) $fatal(1,"decay peak at 90 percent");
+        repeat (2) @(posedge clk); #1;
+        if(dut.decay_sample_pipe < 16'sd32750) $fatal(1,"decay peak at 90 percent");
         force dut.output_phase=32'hf3320000;
-        @(posedge clk); #1;
-        if(dut.decay_sample_pipe < 16'sd16375 ||
-           dut.decay_sample_pipe > 16'sd16390) $fatal(1,"decay midpoint");
+        repeat (2) @(posedge clk); #1;
+        if(dut.decay_sample_pipe < -16'sd16 ||
+           dut.decay_sample_pipe > 16'sd16) $fatal(1,"decay midpoint");
         force dut.output_phase=32'hffff0000;
-        @(posedge clk); #1;
-        if(dut.decay_sample_pipe !== 16'sd0) $fatal(1,"decay end");
+        repeat (2) @(posedge clk); #1;
+        if(dut.decay_sample_pipe !== -16'sd32768) $fatal(1,"decay end");
         // A 500 us setting moves the rising edge to 95% while keeping 100 Hz.
         decay_start=16'hf332; decay_scale=32'd655300;
         force dut.output_phase=32'hf3310000;
-        @(posedge clk); #1;
-        if(dut.decay_sample_pipe !== 16'sd0) $fatal(1,"variable decay start");
+        repeat (2) @(posedge clk); #1;
+        if(dut.decay_sample_pipe !== -16'sd32768) $fatal(1,"variable decay start");
         force dut.output_phase=32'hf3320000;
-        @(posedge clk); #1;
+        repeat (2) @(posedge clk); #1;
         if(dut.decay_sample_pipe < 16'sd32760)
             $fatal(1,"variable decay peak");
         release dut.output_phase;

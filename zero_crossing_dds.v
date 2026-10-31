@@ -155,9 +155,10 @@ module zero_crossing_dds #(
 
     wire signed [15:0] sine_sample;
     reg signed [15:0] saw_sample_pipe = 16'sd0;
+    reg [15:0] decay_phase_pipe = 16'd0;
     reg signed [15:0] decay_sample_pipe = 16'sd0;
     wire [15:0] decay_phase_remaining =
-        16'hffff - output_phase[31:16];
+        16'hffff - decay_phase_pipe;
     wire [47:0] decay_product =
         decay_phase_remaining * config_decay_scale_q16;
     wire [31:0] decay_scaled = decay_product[47:16];
@@ -332,6 +333,7 @@ module zero_crossing_dds #(
             envelope_pipe <= 12'd0;
             amplitude_ramp <= 12'd0;
             saw_sample_pipe <= 16'sd0;
+            decay_phase_pipe <= 16'd0;
             decay_sample_pipe <= 16'sd0;
             rom_valid <= 1'b0;
             scaled_sample <= 29'sd0;
@@ -345,14 +347,22 @@ module zero_crossing_dds #(
             saw_sample_pipe <= $signed(
                 (output_phase[31:16] ^ 16'h8000) ^
                 (saw_reverse ? 16'hffff : 16'h0000));
-            // Fixed 100 Hz pulse with a host-controlled decay duration.
-            // MSPM0 supplies the Q16 start phase and reciprocal slope.
-            if (output_phase[31:16] < config_decay_start)
-                decay_sample_pipe <= 16'sd0;
+            // Register the phase before the variable-slope multiplier so
+            // its result does not share the phase-accumulator critical path.
+            decay_phase_pipe <= output_phase[31:16];
+            // Fixed 100 Hz bipolar pulse with a host-controlled decay.
+            // Hold at negative full scale, jump to positive full scale,
+            // then fall linearly back to negative full scale.  Using both
+            // rails preserves the calibrated 4 Vpp span at amplitude 8/8.
+            if (decay_phase_pipe < config_decay_start)
+                decay_sample_pipe <= 16'sh8000;
             else if (decay_scaled > 32'd32767)
                 decay_sample_pipe <= 16'sd32767;
             else
-                decay_sample_pipe <= $signed(decay_scaled[15:0]);
+                // For 0..32767, shifting left and toggling the sign bit is
+                // exactly 2*x-32768, without adding an adder after the
+                // multiplier on the critical clock path.
+                decay_sample_pipe <= {decay_scaled[14:0], 1'b0} ^ 16'h8000;
             if (!enable || !locked) begin
                 amplitude_ramp <= 12'd0;
             end else if (sample_valid && amplitude_ramp < active_envelope) begin
