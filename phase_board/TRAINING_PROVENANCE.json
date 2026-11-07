@@ -1,0 +1,12 @@
+{
+  "export_kind": "deterministic compact six-frame phase probing plus geometric fit",
+  "source_training_run": "grid100_fresh_20261101",
+  "source_checkpoint_sha256": "71e4ac6c6b771b298febc6b81c74c9d651e21d2ee6db27ec43a6d6bdb7ef6255",
+  "runtime_neural_weights_required": false,
+  "runtime_dependencies": [
+    "numpy",
+    "Pillow"
+  ],
+  "source_frequency_constraint": "exact multiples of 100 Hz, 1k..100k",
+  "note": "Prior training results describe the simulator and action selection, not hardware validation of this exported controller."
+}
