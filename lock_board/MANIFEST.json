@@ -1,0 +1,25 @@
+{
+  "algorithm": "sha256",
+  "files": {
+    ".gitattributes": "6438c41bd2ba0925199917a4cb83903375957857349b14ef6fc81bbae815cf34",
+    ".gitignore": "3f1433e6959ce6f484a83d6442dc2f3a4f8a5769b6a7946462a2393975adf2de",
+    "examples/board_loop.py": "de4d66c17d80cc93bb58fc999edbfb565e5936ca08b78468510b323b428e7974",
+    "lock_control/__init__.py": "bec6a481a00a23f6a029aa08402246d31199bd42f6400d5dc8d9aa86a6a7fefe",
+    "lock_control/__main__.py": "2feb07d18f3600f82944caf53e0c3538c3174ec0bffc0963c5196ed6a66a87ad",
+    "lock_control/assets/policy.json": "f609686c39edba7965885db6a8d5b40db582c965393c59d7859a00de948ceb29",
+    "lock_control/assets/policy.npz": "fd7f8b2c0edc37a7aecd4817d2a97617cfa200c4bc2f489fc71abe00f592ae9a",
+    "lock_control/branches.py": "49d09dff9e969fc5033dfe9ae3be1e594bdf84d837230a8328a7c10dfa68c634",
+    "lock_control/controller.py": "6c4eedec395d92ba32f4d1be672ed6291a68a7622072f8b0cbd2782e57e04be7",
+    "lock_control/features.py": "4e20c51b2ba886cf2c020b067ff7180bf1c83ab225f2a088352b1edbf45ad4c8",
+    "lock_control/fit.py": "6da33fac3f80f7d215e5350f00d35fe71caa4186626bd8e32f602064ab62e01a",
+    "lock_control/geometry.py": "40f99614e4144c0e5883bb0d73d932b35a972f278998b4ee20a263470947213c",
+    "lock_control/pixels.py": "758524c7f7d7e561e3e1014b8fb076f2832623d5f70f540c96b8afb5bcabf4d8",
+    "lock_control/policy.py": "072b75ae507d683c69492b27c1ee0f5cc36eb03949f34e98c1c0c6acd83f4e52",
+    "POLICY_CONVERSION_CHECK.json": "b9fa35bff518bb2d3e1cbc90756761fccbe58f0a41fa5b14d1471b90102f7cb3",
+    "pyproject.toml": "a91623739fd44374e88ea5f064001f7acf79cf9a82c139f7827874519c53b8fa",
+    "README.md": "75a0d1f3dadc99bea3716e6adc68eef81dfde493c4c14bc4fef0b45a22be6981",
+    "requirements.txt": "6daefc5669913a2a8e15b7d8a7e1adee83dc7900375c0e9f557bc1debf22e2a5",
+    "tests/test_controller.py": "cc37b2544d6f4f2e00367f461044221324d2bf427caea1b0c9cc25d43dee99d2",
+    "VALIDATION.json": "bbb7189e48f2f6b36e87309f73e25feb5acf72006c7b3ef05363537820e07cee"
+  }
+}

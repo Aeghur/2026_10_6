@@ -1,0 +1,40 @@
+{
+  "schema": "optical-lock-policy-numpy-1",
+  "source_version": "optical-frequency-trim-lock-balanced-2",
+  "source_round": 40,
+  "source_config": {
+    "seed": 20261107,
+    "rounds": 10000,
+    "scenes_per_round": 6,
+    "updates_per_round": 20,
+    "batch_size": 32,
+    "learning_rate": 0.001,
+    "max_minutes": 15,
+    "validation_cases": 36,
+    "test_cases": 108,
+    "validation_every": 5,
+    "clock_offset_hz": 0,
+    "noise_max": 5,
+    "line_width_max": 2,
+    "phase_tolerance_deg": 5,
+    "end_tolerance_deg": 10,
+    "frequency_tolerance_hz": 0.02,
+    "hardware_error_hz": 2,
+    "trim_limit_hz": 2.25,
+    "exposure_ms": 2,
+    "timestamp_jitter_ms": 1,
+    "tuning_step_hz": 0.0001,
+    "max_iterations": 5,
+    "control_limit_s": 10,
+    "lock_residual_hz": 0.004
+  },
+  "source_checkpoint_sha256": "4cd1d20eecbfb8b87db40233a3eed44b3a344e7858820a804f0655ce7891f251",
+  "numpy_weights_sha256": "fd7f8b2c0edc37a7aecd4817d2a97617cfa200c4bc2f489fc71abe00f592ae9a",
+  "gains": [
+    0.4,
+    0.75,
+    1.0
+  ],
+  "input_features": 22,
+  "note": "Converted trained weights, no optimizer. Runtime is NumPy/Pillow only."
+}

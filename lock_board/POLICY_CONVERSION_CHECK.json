@@ -1,0 +1,12 @@
+{
+  "frequency": {
+    "contexts": 240,
+    "max_logit_difference": 4.76837158203125e-07,
+    "all_decisions_equal": true
+  },
+  "phase": {
+    "contexts": 240,
+    "max_logit_difference": 7.152557373046875e-07,
+    "all_decisions_equal": true
+  }
+}
