@@ -95,6 +95,15 @@ class WaveLinkTests(unittest.TestCase):
         )
         self.assertEqual(ack.mode & 0x20, 0x20)
 
+    def test_unconfirmed_waveform_only_writes_command(self):
+        serial_port = FakeSerial()
+        link = MSPM0WaveLink(serial_port=serial_port)
+        self.assertIsNone(link.send_waveform_unconfirmed("sine", 10000.001, 0, 8))
+        request = FrameDecoder().feed(serial_port.written)[0]
+        self.assertEqual(request.frame_type, TYPE_PC_SET_WAVEFORM)
+        self.assertEqual(struct.unpack("<BIHB", request.payload),
+                         (0, 10_000_001, 0, 0))
+
     def test_falling_sawtooth_round_trip(self):
         serial_port = FakeSerial()
         ack = MSPM0WaveLink(serial_port=serial_port).set_sawtooth(

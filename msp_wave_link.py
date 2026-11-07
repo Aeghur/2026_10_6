@@ -227,6 +227,31 @@ class MSPM0WaveLink:
                 f"等待MSPM0/FPGA端到端确认超时（{self.port}）"
             )
 
+    def send_waveform_unconfirmed(
+        self, waveform: str, frequency_hz: float,
+        phase_degrees: float = 0.0, amplitude: int = 8,
+        *, direction: str = "rising", decay_microseconds: int = 1000
+    ) -> None:
+        """Write one valid waveform command without waiting for an FPGA ACK.
+
+        This is intended for slow, operator-observed calibration.  A successful
+        return only means the complete command was written to the host UART; it
+        must never be presented as an FPGA confirmation.
+        """
+        payload = encode_waveform_payload(
+            waveform, frequency_hz, phase_degrees, amplitude,
+            direction=direction, decay_microseconds=decay_microseconds
+        )
+        with self._lock:
+            if self._serial is None:
+                self.open()
+            self._sequence = (self._sequence % 255) + 1
+            self._serial.reset_input_buffer()
+            self._serial.write(encode_frame(
+                TYPE_PC_SET_WAVEFORM, self._sequence, payload
+            ))
+            self._serial.flush()
+
     def set_sawtooth(
         self, frequency_hz: float, phase_degrees: float = 0.0,
         amplitude: int = 8, *, direction: str = "rising"

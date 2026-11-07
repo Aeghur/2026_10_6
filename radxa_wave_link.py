@@ -23,7 +23,8 @@ link = None
 try:
     os.chdir(sys.argv[1])
     sys.path.insert(0, os.getcwd())
-    from msp_wave_link import MSPM0WaveLink
+    from msp_wave_link import MSPM0WaveLink, encode_waveform_payload
+    from protocol import TYPE_PC_SET_WAVEFORM, encode_frame
     if not shutil.which("fuser"):
         raise RuntimeError("缺少 fuser，无法检查串口占用，请安装 psmisc")
     check = subprocess.run(["fuser", sys.argv[2]], capture_output=True)
@@ -40,12 +41,23 @@ try:
         if request.get("close"):
             break
         try:
-            ack = link.set_waveform(**request)
-            reply({"ack": {"frequency_millihz": ack.frequency_millihz,
-                           "phase_centidegrees": ack.phase_centidegrees,
-                           "amplitude_code": ack.amplitude_code,
-                           "mode": ack.mode,
-                           "decay_microseconds": ack.decay_microseconds}})
+            wait_for_confirmation = request.pop("wait_for_confirmation", True)
+            if wait_for_confirmation:
+                ack = link.set_waveform(**request)
+                reply({"ack": {"frequency_millihz": ack.frequency_millihz,
+                               "phase_centidegrees": ack.phase_centidegrees,
+                               "amplitude_code": ack.amplitude_code,
+                               "mode": ack.mode,
+                               "decay_microseconds": ack.decay_microseconds}})
+            else:
+                payload = encode_waveform_payload(**request)
+                with link._lock:
+                    link._sequence = (link._sequence % 255) + 1
+                    link._serial.reset_input_buffer()
+                    link._serial.write(encode_frame(
+                        TYPE_PC_SET_WAVEFORM, link._sequence, payload))
+                    link._serial.flush()
+                reply({"sent": True})
         except Exception as error:
             reply({"error": str(error)})
             break
@@ -61,11 +73,13 @@ class RadxaWaveLink:
     def __init__(self, host="192.168.137.2", username="radxa", *,
                  directory="/home/radxa/vision_sorter",
                  python="/home/radxa/vision_sorter/.venv/bin/python",
-                 serial_port="/dev/ttyS4", timeout=8.0):
+                 serial_port="/dev/ttyS4", timeout=8.0,
+                 wait_for_confirmation=True):
         self.port = f"{username}@{host} → {serial_port}"
         self.host, self.username = host, username
         self.directory, self.python, self.serial_port = directory, python, serial_port
         self.timeout = timeout
+        self.wait_for_confirmation = wait_for_confirmation
         self.process = None
         self.messages = queue.Queue()
 
@@ -130,9 +144,27 @@ class RadxaWaveLink:
             waveform=waveform, frequency_hz=frequency_hz,
             phase_degrees=phase_degrees, amplitude=amplitude,
             direction=direction,
-            decay_microseconds=decay_microseconds)) + "\n")
+            decay_microseconds=decay_microseconds,
+            wait_for_confirmation=self.wait_for_confirmation)) + "\n")
         self.process.stdin.flush()
         response = self._receive()
+        if not self.wait_for_confirmation:
+            if response.get("sent") is not True:
+                raise MSPM0LinkError("Radxa 未确认串口命令已写入")
+            waveform_bits = {
+                "sine": 0x00,
+                "sawtooth": 0x60 if direction == "falling" else 0x20,
+                "decay_pulse": 0x40,
+            }[waveform]
+            amplitude_code = {8: 0, 2: 1, 4: 2, 6: 3}[amplitude]
+            return TargetAck(
+                frequency_millihz=int(round(frequency_hz * 1000)),
+                phase_centidegrees=int(round(phase_degrees * 100)),
+                amplitude_code=amplitude_code,
+                mode=0x11 | (amplitude_code << 2) | waveform_bits,
+                decay_microseconds=(decay_microseconds
+                                    if waveform == "decay_pulse" else 0),
+            )
         try:
             ack = TargetAck(**response["ack"])
         except (KeyError, TypeError) as error:

@@ -21,7 +21,17 @@ class NetworkLinkTests(unittest.TestCase):
         self.assertEqual(ack.frequency_millihz, 544218)
         self.assertEqual(json.loads(link.process.stdin.getvalue()), dict(
             waveform='sawtooth', frequency_hz=544.218, phase_degrees=90,
-            amplitude=4, direction='falling', decay_microseconds=1000))
+            amplitude=4, direction='falling', decay_microseconds=1000,
+            wait_for_confirmation=True))
+
+    def test_unconfirmed_mode_reports_uart_write_not_fpga_ack(self):
+        link = RadxaWaveLink(timeout=0.01, wait_for_confirmation=False)
+        link.process = SimpleNamespace(stdin=io.StringIO(), poll=lambda: None)
+        link.messages.put(MARKER + json.dumps({'sent': True}))
+        ack = link.set_waveform('sine', 10000.001, 0, 8)
+        request = json.loads(link.process.stdin.getvalue())
+        self.assertFalse(request['wait_for_confirmation'])
+        self.assertEqual(ack.frequency_millihz, 10_000_001)
 
     def test_invalid_target_not_sent(self):
         link = self.make_link({})
