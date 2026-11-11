@@ -490,6 +490,16 @@
               <FilePath>..\User\pc_link.h</FilePath>
             </File>
             <File>
+              <FileName>task_control.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\task_control.c</FilePath>
+            </File>
+            <File>
+              <FileName>task_control.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\User\task_control.h</FilePath>
+            </File>
+            <File>
               <FileName>ti_msp_dl_config.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\ti_msp_dl_config.c</FilePath>

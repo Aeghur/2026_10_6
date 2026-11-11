@@ -5,6 +5,7 @@
 #include "measurement_config.h"
 #include "msp_uart_link.h"
 #include "pc_link.h"
+#include "task_control.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -92,15 +93,29 @@ int main(void)
     bool controlChanged = true;
     bool targetAckPending = false;
     bool doubleRequestPending = false;
+    uint8_t requestedTaskMode;
+    TaskControlSnapshot taskSnapshot;
 
     SYSCFG_DL_init();
     MSP_UART_Link_Init();
     PC_Link_Init();
     Keypad_Control_Init(targetMode, targetPhase);
+    Task_Control_Init(Keypad_Control_Millis());
 
     while (1) {
         if (Keypad_Control_Poll(&targetMode, &targetPhase))
             controlChanged = true;
+
+        if (Keypad_Control_TakeTaskRequest(&requestedTaskMode)) {
+            Task_Control_Start(
+                requestedTaskMode, Keypad_Control_Millis());
+            Task_Control_GetSnapshot(&taskSnapshot);
+            Keypad_Control_UpdateTask(&taskSnapshot);
+        }
+        if (Task_Control_Poll(Keypad_Control_Millis())) {
+            Task_Control_GetSnapshot(&taskSnapshot);
+            Keypad_Control_UpdateTask(&taskSnapshot);
+        }
 
         if (PC_Link_TakePhaseRequest(&requestedPhase)) {
             targetPhase = requestedPhase;

@@ -1,6 +1,7 @@
 #include "keypad_control.h"
 
 #include "measurement_config.h"
+#include "pc_link.h"
 #include "spi0_oled.h"
 #include "ti_msp_dl_config.h"
 
@@ -12,6 +13,7 @@
 static volatile uint8_t gKeyQueue[KEYPAD_QUEUE_SIZE];
 static volatile uint8_t gKeyQueueHead;
 static volatile uint8_t gKeyQueueTail;
+static volatile uint32_t gMilliseconds;
 static uint8_t gRawCandidateKey;
 static uint8_t gRawStableKey;
 static uint8_t gRawCandidateCount;
@@ -19,6 +21,13 @@ static bool gPhaseEntryActive;
 static bool gPhaseEntryValid;
 static uint16_t gPhaseEntryDegrees;
 static uint8_t gPhaseEntryDigits;
+static bool gTaskMenuActive;
+static bool gTaskRequestPending;
+static uint8_t gTaskRequestMode;
+static bool gTaskViewDismissed;
+static TaskControlSnapshot gTaskSnapshot;
+static uint8_t gLastOutputMode;
+static uint16_t gLastPhaseCentiDegrees;
 
 static void showLine(uint8_t page, const char *text)
 {
@@ -40,6 +49,106 @@ static void showThreeDigits(uint8_t *destination, uint16_t value)
     destination[0] = (uint8_t) ('0' + value / 100U);
     destination[1] = (uint8_t) ('0' + (value / 10U) % 10U);
     destination[2] = (uint8_t) ('0' + value % 10U);
+}
+
+static void showFiveDigits(uint8_t *destination, uint32_t value)
+{
+    uint32_t divisor = 10000UL;
+    uint8_t index;
+
+    if (value > 99999UL)
+        value = 99999UL;
+    for (index = 0U; index < 5U; index++) {
+        destination[index] = (uint8_t) ('0' + value / divisor);
+        value %= divisor;
+        divisor /= 10UL;
+    }
+}
+
+static void showMilliseconds(uint8_t page, const char *prefix, uint32_t value)
+{
+    uint8_t line[17] = "TIME:00000.0 SEC";
+    uint32_t tenths = value / 100UL;
+    uint8_t index;
+
+    for (index = 0U; index < 5U; index++)
+        line[index] = (uint8_t) prefix[index];
+    showFiveDigits(&line[5], tenths / 10UL);
+    line[11] = (uint8_t) ('0' + tenths % 10UL);
+    OLED_ShowString(0U, page, line);
+}
+
+static const char *taskStateText(uint8_t state)
+{
+    switch (state) {
+        case TASK_CONTROL_STATE_SENDING: return "SENDING REQUEST";
+        case PC_TASK_STATE_BOOTING: return "SERVICE BOOTING";
+        case PC_TASK_STATE_READY: return "SERVICE READY";
+        case PC_TASK_STATE_ACCEPTED: return "TASK ACCEPTED";
+        case PC_TASK_STATE_RUNNING: return "TASK RUNNING";
+        case PC_TASK_STATE_SUCCEEDED: return "TASK SUCCEEDED";
+        case PC_TASK_STATE_FAILED: return "TASK FAILED";
+        case PC_TASK_STATE_BUSY: return "SERVICE BUSY";
+        case PC_TASK_STATE_REJECTED: return "TASK REJECTED";
+        case PC_TASK_STATE_FAULT: return "SERVICE FAULT";
+        default: return "UNKNOWN STATE";
+    }
+}
+
+static const char *taskReasonText(uint8_t reason)
+{
+    switch (reason) {
+        case PC_TASK_REASON_NONE: return "#=TASK MENU";
+        case PC_TASK_REASON_FORMAT: return "ERR:FORMAT";
+        case PC_TASK_REASON_SESSION: return "ERR:SESSION";
+        case PC_TASK_REASON_BUSY: return "ERR:BUSY";
+        case PC_TASK_REASON_TIMEOUT: return "ERR:TIMEOUT";
+        case PC_TASK_REASON_FREQUENCY: return "ERR:FREQUENCY";
+        case PC_TASK_REASON_HARDWARE: return "ERR:HARDWARE";
+        case PC_TASK_REASON_VERIFY_OUTPUT: return "VERIFY OUTPUT";
+        case PC_TASK_REASON_CAPACITY: return "ERR:CAPACITY";
+        case PC_TASK_REASON_ID_CONFLICT: return "ID CONFLICT";
+        case PC_TASK_REASON_NOT_READY: return "ERR:NOT READY";
+        case PC_TASK_REASON_NOT_FOUND: return "ERR:NOT FOUND";
+        default: return "UNKNOWN REASON";
+    }
+}
+
+static bool taskInputLocked(void)
+{
+    return gTaskSnapshot.taskActive ||
+           gTaskSnapshot.serviceState == PC_TASK_STATE_ACCEPTED ||
+           gTaskSnapshot.serviceState == PC_TASK_STATE_RUNNING;
+}
+
+static void showTaskMenu(void)
+{
+    showLine(0U, "AUTO MEASURE");
+    if (gTaskSnapshot.serviceReady) {
+        showLine(2U, "A=DIAG  B=OVAL");
+        showLine(4U, "C=INFINITY");
+    } else {
+        showLine(2U, "SERVICE NOT READY");
+        showLine(4U, taskStateText(gTaskSnapshot.serviceState));
+    }
+    showLine(6U, "#=BACK");
+}
+
+static void showTaskStatus(void)
+{
+    switch (gTaskSnapshot.taskMode) {
+        case PC_TASK_MODE_DIAGONAL: showLine(0U, "AUTO:DIAGONAL"); break;
+        case PC_TASK_MODE_ELLIPSE: showLine(0U, "AUTO:CIRCLE/OVAL"); break;
+        case PC_TASK_MODE_INFINITY: showLine(0U, "AUTO:INFINITY"); break;
+        default: showLine(0U, "AUTO MEASURE"); break;
+    }
+    showLine(2U, taskStateText(gTaskSnapshot.taskState));
+    showMilliseconds(4U, "TIME:", gTaskSnapshot.elapsedMs);
+    if (gTaskSnapshot.taskState == PC_TASK_STATE_RUNNING ||
+        gTaskSnapshot.taskState == PC_TASK_STATE_SUCCEEDED)
+        showMilliseconds(6U, "STBL:", gTaskSnapshot.stableMs);
+    else
+        showLine(6U, taskReasonText(gTaskSnapshot.taskReason));
 }
 
 static uint8_t amplitudeValue(uint8_t outputMode)
@@ -127,6 +236,9 @@ void Keypad_Control_RefreshDisplay(
     uint16_t degrees = phaseCentiDegrees / 100U;
     uint8_t amplitude = amplitudeValue(outputMode);
 
+    gLastOutputMode = outputMode;
+    gLastPhaseCentiDegrees = phaseCentiDegrees;
+
     if (gPhaseEntryActive) {
         uint8_t entry[17] = "VALUE:--- DEG   ";
 
@@ -136,6 +248,16 @@ void Keypad_Control_RefreshDisplay(
         OLED_ShowString(0U, 2U, entry);
         showLine(4U, "A=0    B=90");
         showLine(6U, "#=OK   C=CANCEL");
+        return;
+    }
+
+    if (gTaskMenuActive) {
+        showTaskMenu();
+        return;
+    }
+
+    if (gTaskSnapshot.hasTask && !gTaskViewDismissed) {
+        showTaskStatus();
         return;
     }
 
@@ -176,7 +298,7 @@ void Keypad_Control_RefreshDisplay(
     line[16] = 0U;
     OLED_ShowString(0U, 4U, line);
 
-    showLine(6U, "*=PHASE D=X1/X2");
+    showLine(6U, "#=AUTO  *=PHASE");
 }
 
 void Keypad_Control_Init(
@@ -184,6 +306,7 @@ void Keypad_Control_Init(
 {
     gKeyQueueHead = 0U;
     gKeyQueueTail = 0U;
+    gMilliseconds = 0U;
     gRawCandidateKey = 0U;
     gRawStableKey = 0U;
     gRawCandidateCount = 0U;
@@ -191,6 +314,16 @@ void Keypad_Control_Init(
     gPhaseEntryValid = false;
     gPhaseEntryDegrees = 0U;
     gPhaseEntryDigits = 0U;
+    gTaskMenuActive = false;
+    gTaskRequestPending = false;
+    gTaskRequestMode = PC_TASK_MODE_SERVICE;
+    gTaskViewDismissed = false;
+    gTaskSnapshot.serviceKnown = false;
+    gTaskSnapshot.serviceReady = false;
+    gTaskSnapshot.serviceState = PC_TASK_STATE_BOOTING;
+    gTaskSnapshot.sessionId = 0U;
+    gTaskSnapshot.hasTask = false;
+    gTaskSnapshot.taskActive = false;
 
     OLED_Init();
     Keypad_Control_RefreshDisplay(outputMode, phaseCentiDegrees);
@@ -207,6 +340,8 @@ void SysTick_Handler(void)
     uint8_t key = scanDebouncedKey();
     uint8_t nextHead;
 
+    gMilliseconds += 1000U / KEYPAD_SCAN_HZ;
+
     if (key == 0U)
         return;
     nextHead = (uint8_t) ((gKeyQueueHead + 1U) & KEYPAD_QUEUE_MASK);
@@ -219,14 +354,6 @@ void SysTick_Handler(void)
 bool Keypad_Control_HandleKey(
     uint8_t key, uint8_t *outputMode, uint16_t *phaseCentiDegrees)
 {
-    if (key == '*') {
-        gPhaseEntryActive = true;
-        gPhaseEntryValid = false;
-        gPhaseEntryDegrees = 0U;
-        gPhaseEntryDigits = 0U;
-        return false;
-    }
-
     if (gPhaseEntryActive) {
         if (key >= '0' && key <= '9') {
             uint16_t nextValue;
@@ -263,6 +390,37 @@ bool Keypad_Control_HandleKey(
         return false;
     }
 
+    if (taskInputLocked())
+        return false;
+
+    if (gTaskMenuActive) {
+        if (gTaskSnapshot.serviceReady &&
+            (key == 'A' || key == 'B' || key == 'C')) {
+            gTaskRequestMode = key == 'A' ? PC_TASK_MODE_DIAGONAL :
+                               key == 'B' ? PC_TASK_MODE_ELLIPSE :
+                                            PC_TASK_MODE_INFINITY;
+            gTaskRequestPending = true;
+            gTaskMenuActive = false;
+        } else if (key == '#') {
+            gTaskMenuActive = false;
+        }
+        return false;
+    }
+
+    if (key == '#') {
+        gTaskMenuActive = true;
+        gTaskViewDismissed = true;
+        return false;
+    }
+
+    if (key == '*') {
+        gPhaseEntryActive = true;
+        gPhaseEntryValid = false;
+        gPhaseEntryDegrees = 0U;
+        gPhaseEntryDigits = 0U;
+        return false;
+    }
+
     if (key == 'D') {
         *outputMode &= (uint8_t) ~(MEASUREMENT_MODE_FREE_RUN |
                                    MEASUREMENT_MODE_WAVEFORM_SAW |
@@ -284,6 +442,40 @@ bool Keypad_Control_HandleKey(
     }
 
     return false;
+}
+
+uint32_t Keypad_Control_Millis(void)
+{
+    uint32_t milliseconds;
+
+    __disable_irq();
+    milliseconds = gMilliseconds;
+    __enable_irq();
+    return milliseconds;
+}
+
+bool Keypad_Control_TakeTaskRequest(uint8_t *mode)
+{
+    if (!gTaskRequestPending)
+        return false;
+    *mode = gTaskRequestMode;
+    gTaskRequestPending = false;
+    return true;
+}
+
+void Keypad_Control_UpdateTask(const TaskControlSnapshot *snapshot)
+{
+    bool taskChanged = snapshot->hasTask &&
+        (!gTaskSnapshot.hasTask ||
+         snapshot->taskRequestId != gTaskSnapshot.taskRequestId ||
+         snapshot->taskState != gTaskSnapshot.taskState ||
+         snapshot->taskReason != gTaskSnapshot.taskReason);
+
+    gTaskSnapshot = *snapshot;
+    if (taskChanged)
+        gTaskViewDismissed = false;
+    Keypad_Control_RefreshDisplay(
+        gLastOutputMode, gLastPhaseCentiDegrees);
 }
 
 bool Keypad_Control_Poll(
