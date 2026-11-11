@@ -211,6 +211,33 @@ MSPM0每10 ms扫描并消抖矩阵键盘。OLED同步显示当前输出模式、
 扫描码；因此物理键帽仍按正常标注使用，并且三位相位中的百位`1`不会被误判为
 重新进入相位输入。
 
+## Radxa自动测量任务通信
+
+MSPM0的UART1统一帧解析器已支持自动测量任务协议，但本阶段尚未把任务绑定到
+矩阵键盘、OLED菜单或LED。新增报文沿用现有`A5 5A`帧头和CRC16：
+
+- `0x20 TASK_START`：MSPM0请求启动对角线、圆/椭圆或∞任务；
+- `0x21 TASK_QUERY`：MSPM0查询服务或指定任务；
+- `0xA0 TASK_STATUS`：Radxa返回服务状态、任务进度或最终结果。
+
+固件接口位于`KeyBoardpro/User/pc_link.h`：
+
+```c
+bool PC_Link_SendTaskStart(
+    uint8_t sequence, uint8_t mode, uint32_t requestId,
+    uint32_t sessionId);
+bool PC_Link_SendTaskQuery(
+    uint8_t sequence, uint32_t requestId, uint32_t sessionId);
+bool PC_Link_TakeTaskStatus(PCTaskStatus *status);
+```
+
+接收到的24字节状态载荷进入独立环形队列；任务状态在MSPM0本地消费，不会转发
+给FPGA。队列满时丢弃最旧进度、保留最新状态。旧`0x13/0x14/0x15`波形命令和
+真实FPGA ACK流程不变，发送仍统一在主循环调用，避免两个UART帧的字节交错。
+
+Radxa侧可使用`task_protocol.py`编码启动/查询帧并校验状态载荷。协议合同中的
+四组完整帧样例由`test_task_protocol.py`逐字节回归。
+
 独立DPLL/DDS工程建议改用实时诊断脚本，它不会显示占位波形，而是直接读取
 FPGA的锁定状态和环路相位误差：
 

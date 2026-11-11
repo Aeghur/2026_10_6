@@ -7,9 +7,16 @@
 #define FRAME_TYPE_SET_TARGET (0x13U)
 #define FRAME_TYPE_SET_WAVEFORM (0x14U)
 #define FRAME_TYPE_ARM_DOUBLE (0x15U)
+#define FRAME_TYPE_TASK_START (0x20U)
+#define FRAME_TYPE_TASK_QUERY (0x21U)
 #define FRAME_TYPE_TARGET_ACK (0x93U)
 #define FRAME_TYPE_DOUBLE_ACK (0x94U)
+#define FRAME_TYPE_TASK_STATUS (0xA0U)
 #define FRAME_TYPE_ERROR   (0xE0U)
+
+#define TASK_STATUS_PAYLOAD_LENGTH (24U)
+#define TASK_STATUS_QUEUE_SIZE     (8U)
+#define TASK_STATUS_QUEUE_MASK     (TASK_STATUS_QUEUE_SIZE - 1U)
 
 static volatile bool gPhasePending;
 static volatile uint16_t gPhaseCentiDegrees;
@@ -24,14 +31,58 @@ static volatile uint8_t gTargetWaveform;
 static volatile uint16_t gTargetDecayMicroseconds;
 static volatile bool gDoublePending;
 static volatile uint8_t gDoubleSequence;
+static volatile PCTaskStatus gTaskStatusQueue[TASK_STATUS_QUEUE_SIZE];
+static volatile uint8_t gTaskStatusHead;
+static volatile uint8_t gTaskStatusTail;
 static uint8_t gRxState;
 static uint8_t gRxType;
 static uint8_t gRxSequence;
 static uint8_t gRxCrcLow;
 static uint16_t gRxCrc;
 static uint8_t gRxLength;
-static uint8_t gRxPayload[10];
+static uint8_t gRxPayload[TASK_STATUS_PAYLOAD_LENGTH];
 static uint8_t gRxPayloadIndex;
+
+static uint32_t readU32(const uint8_t *source)
+{
+    return (uint32_t) source[0] |
+           ((uint32_t) source[1] << 8) |
+           ((uint32_t) source[2] << 16) |
+           ((uint32_t) source[3] << 24);
+}
+
+static void enqueueTaskStatus(uint8_t sequence)
+{
+    uint8_t nextHead;
+    volatile PCTaskStatus *status;
+
+    if (gRxPayload[0] != PC_TASK_PROTOCOL_VERSION ||
+        gRxPayload[1] > PC_TASK_MODE_INFINITY ||
+        gRxPayload[6] > PC_TASK_STATE_FAULT ||
+        gRxPayload[7] > PC_TASK_REASON_NOT_FOUND ||
+        readU32(&gRxPayload[20]) == 0U)
+        return;
+
+    nextHead = (uint8_t)
+        ((gTaskStatusHead + 1U) & TASK_STATUS_QUEUE_MASK);
+    if (nextHead == gTaskStatusTail) {
+        /* Keep the newest progress/final result if the main loop is late. */
+        gTaskStatusTail = (uint8_t)
+            ((gTaskStatusTail + 1U) & TASK_STATUS_QUEUE_MASK);
+    }
+    status = &gTaskStatusQueue[gTaskStatusHead];
+    status->sequence = sequence;
+    status->version = gRxPayload[0];
+    status->mode = gRxPayload[1];
+    status->requestId = readU32(&gRxPayload[2]);
+    status->state = gRxPayload[6];
+    status->reason = gRxPayload[7];
+    status->elapsedMs = readU32(&gRxPayload[8]);
+    status->stableMs = readU32(&gRxPayload[12]);
+    status->controlMs = readU32(&gRxPayload[16]);
+    status->sessionId = readU32(&gRxPayload[20]);
+    gTaskStatusHead = nextHead;
+}
 
 static uint16_t crc16Update(uint16_t crc, uint8_t value)
 {
@@ -93,9 +144,37 @@ void PC_Link_Init(void)
     gModePending = false;
     gTargetPending = false;
     gDoublePending = false;
+    gTaskStatusHead = 0U;
+    gTaskStatusTail = 0U;
     gRxState = 0U;
     NVIC_ClearPendingIRQ(PC_UART_INST_INT_IRQN);
     NVIC_EnableIRQ(PC_UART_INST_INT_IRQN);
+}
+
+bool PC_Link_TakeTaskStatus(PCTaskStatus *status)
+{
+    const volatile PCTaskStatus *queued;
+
+    __disable_irq();
+    if (gTaskStatusTail == gTaskStatusHead) {
+        __enable_irq();
+        return false;
+    }
+    queued = &gTaskStatusQueue[gTaskStatusTail];
+    status->sequence = queued->sequence;
+    status->version = queued->version;
+    status->mode = queued->mode;
+    status->requestId = queued->requestId;
+    status->state = queued->state;
+    status->reason = queued->reason;
+    status->elapsedMs = queued->elapsedMs;
+    status->stableMs = queued->stableMs;
+    status->controlMs = queued->controlMs;
+    status->sessionId = queued->sessionId;
+    gTaskStatusTail = (uint8_t)
+        ((gTaskStatusTail + 1U) & TASK_STATUS_QUEUE_MASK);
+    __enable_irq();
+    return true;
 }
 
 bool PC_Link_TakeDoubleRequest(uint8_t *sequence)
@@ -108,6 +187,40 @@ bool PC_Link_TakeDoubleRequest(uint8_t *sequence)
     *sequence = gDoubleSequence;
     gDoublePending = false;
     __enable_irq();
+    return true;
+}
+
+bool PC_Link_SendTaskStart(
+    uint8_t sequence, uint8_t mode, uint32_t requestId,
+    uint32_t sessionId)
+{
+    uint16_t crc;
+
+    if (mode < PC_TASK_MODE_DIAGONAL ||
+        mode > PC_TASK_MODE_INFINITY ||
+        requestId == 0U || sessionId == 0U)
+        return false;
+    beginFrame(FRAME_TYPE_TASK_START, sequence, 10U, &crc);
+    sendCheckedByte(PC_TASK_PROTOCOL_VERSION, &crc);
+    sendCheckedByte(mode, &crc);
+    sendU32(requestId, &crc);
+    sendU32(sessionId, &crc);
+    endFrame(crc);
+    return true;
+}
+
+bool PC_Link_SendTaskQuery(
+    uint8_t sequence, uint32_t requestId, uint32_t sessionId)
+{
+    uint16_t crc;
+
+    if (requestId != 0U && sessionId == 0U)
+        return false;
+    beginFrame(FRAME_TYPE_TASK_QUERY, sequence, 9U, &crc);
+    sendCheckedByte(PC_TASK_PROTOCOL_VERSION, &crc);
+    sendU32(requestId, &crc);
+    sendU32(sessionId, &crc);
+    endFrame(crc);
     return true;
 }
 
@@ -217,7 +330,8 @@ void UART1_IRQHandler(void)
                     value == FRAME_TYPE_SET_MODE ||
                     value == FRAME_TYPE_SET_TARGET ||
                     value == FRAME_TYPE_SET_WAVEFORM ||
-                    value == FRAME_TYPE_ARM_DOUBLE) {
+                    value == FRAME_TYPE_ARM_DOUBLE ||
+                    value == FRAME_TYPE_TASK_STATUS) {
                     gRxType = value;
                     gRxCrc = crc16Update(0xFFFFU, value);
                     gRxLength = 0U;
@@ -248,7 +362,9 @@ void UART1_IRQHandler(void)
                     (gRxType == FRAME_TYPE_SET_WAVEFORM &&
                      gRxLength != 8U && gRxLength != 10U) ||
                     (gRxType == FRAME_TYPE_ARM_DOUBLE &&
-                     gRxLength != 0U)) {
+                     gRxLength != 0U) ||
+                    (gRxType == FRAME_TYPE_TASK_STATUS &&
+                     gRxLength != TASK_STATUS_PAYLOAD_LENGTH)) {
                     gRxState = 0U;
                 } else if (gRxLength == 0U) {
                     gRxState = 8U;
@@ -342,6 +458,9 @@ void UART1_IRQHandler(void)
                             gDoubleSequence = gRxSequence;
                             gDoublePending = true;
                         }
+                    } else if (gRxType == FRAME_TYPE_TASK_STATUS &&
+                               gRxLength == TASK_STATUS_PAYLOAD_LENGTH) {
+                        enqueueTaskStatus(gRxSequence);
                     }
                 }
                 gRxState = 0U;
