@@ -59,6 +59,20 @@ FFT。FPGA以50 MHz采样T14，经两级同步和4时钟周期滤波，
 DDS频率字决定。轻量确认帧只确认MSPM0已将命令发往FPGA；实际模拟幅相仍应
 用示波器核验。
 
+相位已由圆阶段确定后，专用`ARM_DOUBLE_AT_FALLING_ZERO`事务可将自由运行正弦
+从1倍频切换到精确2倍频。FPGA等待有效查表相位的下降过零跨越，将当前Q38 FTW
+原子左移一位，不重置相位累加器、相移或幅度。专用ACK会等到带新频率标签的样本
+实际更新DAC数字接口后再返回；普通`SET_OUTPUT`的立即更新语义保持不变。Radxa
+调用`MSPM0WaveLink.arm_double_at_falling_zero()`，或运行：
+
+```powershell
+python wave_control.py --port /dev/ttyS4 --arm-double
+```
+
+该操作仅适用于自由运行、1倍频、正弦、已锁定且2倍后不超过210 kHz的状态。后续
+小数Hz修频和相位微调继续使用普通绝对波形命令。协议与ACK字段详见
+[`radxa/WAVEFORM_CONTROL_PROTOCOL.md`](radxa/WAVEFORM_CONTROL_PROTOCOL.md)。
+
 ## FPGA工程
 
 Quartus工程为 `ads805.qpf`，器件为 `EP4CE6F17C8`。
@@ -241,7 +255,7 @@ MSPM0G3519的UART1位于PD0，BUSCLK为40 MHz，采用`2 + 32/64`分频和16倍
 ## 验证
 
 ```powershell
-python -m unittest -v test_protocol.py
+python -m unittest -v test_protocol.py test_msp_wave_link.py test_radxa_wave_link.py
 
 iverilog -g2012 -o tb_delay.out variable_sample_delay.v tb_variable_sample_delay.v
 vvp tb_delay.out
@@ -249,11 +263,17 @@ vvp tb_delay.out
 iverilog -g2012 -o tb_dds.out sine_rom_1024.v zero_crossing_dds.v tb_zero_crossing_dds.v
 vvp tb_dds.out
 
+iverilog -g2012 -o tb_dds_arm_double.out sine_rom_1024.v zero_crossing_dds.v tb_dds_arm_double.v
+vvp tb_dds_arm_double.out
+
 iverilog -g2012 -o tb_meter.out comparator_frequency_meter.v six_digit_frequency_display.v tb_comparator_frequency_meter.v
 vvp tb_meter.out
 
 iverilog -g2012 -o tb.out ad9226_capture.v variable_sample_delay.v sine_rom_1024.v zero_crossing_dds.v comparator_frequency_meter.v six_digit_frequency_display.v adc_dac_voltage_mapper.v dac904_output.v uart_tx.v uart_rx.v ads805.v tb_ads805.v
 vvp tb.out
+
+iverilog -g2012 -o tb_arm_double_uart.out ad9226_capture.v variable_sample_delay.v sine_rom_1024.v zero_crossing_dds.v comparator_frequency_meter.v six_digit_frequency_display.v adc_dac_voltage_mapper.v dac904_output.v uart_tx.v uart_rx.v ads805.v tb_arm_double_uart.v
+vvp tb_arm_double_uart.out
 ```
 
 ## 调相范围限制

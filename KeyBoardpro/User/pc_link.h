@@ -13,10 +13,14 @@ bool PC_Link_TakeTargetRequest(
     uint8_t *sequence, uint32_t *frequencyMilliHz,
     uint16_t *phaseCentiDegrees, uint8_t *amplitudeCode,
     uint8_t *waveform, uint16_t *decayMicroseconds);
+bool PC_Link_TakeDoubleRequest(uint8_t *sequence);
 void PC_Link_SendTargetAck(
     uint8_t sequence, uint32_t frequencyMilliHz,
     uint16_t phaseCentiDegrees, uint8_t amplitudeCode, uint8_t mode,
     uint16_t decayMicroseconds);
 void PC_Link_SendError(uint8_t sequence, uint16_t errorCode);
+void PC_Link_SendDoubleAck(
+    uint8_t sequence, uint32_t appliedSampleCounter,
+    uint32_t oldPhaseStep, uint32_t newPhaseStep, uint32_t commitPhase);
 
 #endif

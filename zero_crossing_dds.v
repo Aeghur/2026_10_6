@@ -21,6 +21,8 @@ module zero_crossing_dds #(
     parameter integer PIPELINE_ADVANCE_SAMPLES = 10,
     parameter integer PHASE_CALIBRATION_LAG_CDEG = 0,
     parameter integer PHASE_CALIBRATION_DELAY_SAMPLES = 0,
+    parameter [31:0] MAX_FREE_RUN_FTW = 32'hffffffff,
+    parameter integer DOUBLE_TIMEOUT_SAMPLES = SAMPLE_HZ / 10,
     parameter ROM_FILE = "dpll_dds_fpga/rtl/sine_1024x16.hex"
 ) (
     input  wire        clk,
@@ -36,6 +38,7 @@ module zero_crossing_dds #(
     input  wire        waveform_saw,
     input  wire        saw_reverse,
     input  wire        waveform_decay,
+    input  wire        arm_double,
     input  wire [1:0]  amplitude_scale_code,
     input  wire        reference_edge,
     input  wire        sample_valid,
@@ -43,7 +46,16 @@ module zero_crossing_dds #(
     output reg         output_valid = 1'b0,
     output reg  [11:0] output_sample = ADC_ZERO_CODE[11:0],
     output reg         locked = 1'b0,
-    output wire        signal_present
+    output wire        signal_present,
+    output reg         double_busy = 1'b0,
+    output reg         double_committed = 1'b0,
+    output reg         double_output_applied = 1'b0,
+    output reg         double_error = 1'b0,
+    output reg  [1:0]  double_error_code = 2'd0,
+    output reg  [31:0] double_sample_counter = 32'd0,
+    output reg  [31:0] double_old_step = 32'd0,
+    output reg  [31:0] double_new_step = 32'd0,
+    output reg  [31:0] double_commit_phase = 32'd0
 );
     localparam integer LOST_CROSSING_SAMPLES = SAMPLE_HZ / 700;
 
@@ -55,8 +67,12 @@ module zero_crossing_dds #(
     // across frequency/phase updates; overflow advances the Q32 carrier.
     reg [5:0] free_run_fraction = 6'd0;
     reg [5:0] free_run_step_fraction = 6'd0;
+    reg [31:0] free_run_ftw = 32'd0;
     wire [6:0] free_run_fraction_sum =
         {1'b0, free_run_fraction} + {1'b0, free_run_step_fraction};
+    wire [31:0] doubled_free_run_ftw = {free_run_ftw[30:0], 1'b0};
+    wire [31:0] free_run_phase_increment =
+        phase_step + free_run_fraction_sum[6];
     reg signed [32:0] frequency_trim = 33'sd0;
     reg signed [32:0] proportional_trim = 33'sd0;
     reg signed [32:0] loop_error_shift = 33'sd0;
@@ -64,6 +80,9 @@ module zero_crossing_dds #(
     reg loop_update_pending = 1'b0;
     reg reference_pending = 1'b0;
     reg [15:0] samples_since_crossing = 16'hffff;
+    reg [31:0] sample_counter = 32'd0;
+    reg [31:0] double_wait_samples = 32'd0;
+    reg [1:0] double_tag_wait = 2'd0;
 
     localparam signed [12:0] ADC_ZERO_SIGNED = ADC_ZERO_CODE[12:0];
     wire signed [12:0] centered_sample =
@@ -152,6 +171,13 @@ module zero_crossing_dds #(
         (carrier_phase - applied_phase_lag) :
         (carrier_phase + phase_advance - applied_phase_lag -
          calibration_delay_product[31:0] - calibration_lag_word);
+    wire [31:0] next_free_run_output_phase =
+        output_phase + free_run_phase_increment;
+    wire free_run_falling_crossing =
+        !output_phase[31] && next_free_run_output_phase[31];
+    wire phase_command_settled = phase_lag == applied_phase_lag;
+    wire double_first_new_phase_address =
+        sample_valid && double_tag_wait == 2'd1;
 
     wire signed [15:0] sine_sample;
     reg signed [15:0] saw_sample_pipe = 16'sd0;
@@ -171,6 +197,8 @@ module zero_crossing_dds #(
     reg rom_valid = 1'b0;
     reg signed [28:0] scaled_sample = 29'sd0;
     reg scale_valid = 1'b0;
+    reg rom_double_tag = 1'b0;
+    reg scale_double_tag = 1'b0;
     wire signed [28:0] reconstructed_wide =
         ADC_ZERO_SIGNED + (scaled_sample >>> 15);
 
@@ -201,6 +229,7 @@ module zero_crossing_dds #(
             carrier_phase <= 32'd0;
             free_run_fraction <= 6'd0;
             free_run_step_fraction <= 6'd0;
+            free_run_ftw <= 32'd0;
             frequency_trim <= 33'sd0;
             proportional_trim <= 33'sd0;
             loop_error_shift <= 33'sd0;
@@ -211,7 +240,35 @@ module zero_crossing_dds #(
             envelope <= 12'd0;
             decay_count <= 12'd0;
             locked <= 1'b0;
+            sample_counter <= 32'd0;
+            double_busy <= 1'b0;
+            double_committed <= 1'b0;
+            double_error <= 1'b0;
+            double_error_code <= 2'd0;
+            double_wait_samples <= 32'd0;
+            double_tag_wait <= 2'd0;
+            double_sample_counter <= 32'd0;
+            double_old_step <= 32'd0;
+            double_new_step <= 32'd0;
+            double_commit_phase <= 32'd0;
         end else begin
+            double_committed <= 1'b0;
+            double_error <= 1'b0;
+            if (arm_double) begin
+                if (double_busy) begin
+                    double_error <= 1'b1;
+                    double_error_code <= 2'd1;
+                end else if (!enable || !free_run || waveform_saw ||
+                             waveform_decay || !locked ||
+                             free_run_ftw == 0 ||
+                             free_run_ftw > (MAX_FREE_RUN_FTW >> 1)) begin
+                    double_error <= 1'b1;
+                    double_error_code <= 2'd2;
+                end else begin
+                    double_busy <= 1'b1;
+                    double_wait_samples <= 32'd0;
+                end
+            end
             if (reference_edge && !free_run)
                 reference_pending <= 1'b1;
             // Period normalization is performed serially because loop
@@ -237,6 +294,8 @@ module zero_crossing_dds #(
             if (config_valid) begin
                 phase_step <= free_run ? (config_phase_step >> 6) : config_phase_step;
                 free_run_step_fraction <= config_phase_step[5:0];
+                if (free_run)
+                    free_run_ftw <= config_phase_step;
                 phase_lag <= config_phase_lag;
                 if (free_run) begin
                     locked <= config_phase_step != 0;
@@ -254,6 +313,38 @@ module zero_crossing_dds #(
             end
 
             if (sample_valid) begin
+                sample_counter <= sample_counter + 1'b1;
+                if (double_tag_wait != 0)
+                    double_tag_wait <= double_tag_wait - 1'b1;
+
+                if (double_busy) begin
+                    if (double_wait_samples >= DOUBLE_TIMEOUT_SAMPLES - 1) begin
+                        double_busy <= 1'b0;
+                        double_error <= 1'b1;
+                        double_error_code <= 2'd3;
+                    end else begin
+                        double_wait_samples <= double_wait_samples + 1'b1;
+                        if (phase_command_settled &&
+                            free_run_falling_crossing) begin
+                            // Advance across this falling-zero boundary with
+                            // the old increment.  The following accumulator
+                            // interval uses exactly twice the current Q38 FTW.
+                            // Carrier phase and requested lag are not reset.
+                            double_busy <= 1'b0;
+                            double_committed <= 1'b1;
+                            double_sample_counter <= sample_counter;
+                            double_old_step <= free_run_ftw;
+                            double_new_step <= doubled_free_run_ftw;
+                            double_commit_phase <= output_phase;
+                            free_run_ftw <= doubled_free_run_ftw;
+                            phase_step <= doubled_free_run_ftw >> 6;
+                            free_run_step_fraction <=
+                                doubled_free_run_ftw[5:0];
+                            double_tag_wait <= 2'd2;
+                        end
+                    end
+                end
+
                 // Slew a live phase command over about eight input periods.
                 // Command changes therefore cannot jump the ROM address.
                 if (!locked || phase_lag_slew == 0)
@@ -338,6 +429,9 @@ module zero_crossing_dds #(
             rom_valid <= 1'b0;
             scaled_sample <= 29'sd0;
             scale_valid <= 1'b0;
+            rom_double_tag <= 1'b0;
+            scale_double_tag <= 1'b0;
+            double_output_applied <= 1'b0;
             output_valid <= 1'b0;
             output_sample <= ADC_ZERO_CODE[11:0];
         end else begin
@@ -381,12 +475,16 @@ module zero_crossing_dds #(
             end
 
             scale_valid <= rom_valid;
+            rom_double_tag <= double_first_new_phase_address &&
+                enable && locked;
+            scale_double_tag <= rom_double_tag;
             if (rom_valid)
                 scaled_sample <=
                     $signed(waveform_sample) *
                     $signed({1'b0, envelope_pipe});
 
             output_valid <= scale_valid;
+            double_output_applied <= scale_double_tag;
             if (scale_valid) begin
                 if (reconstructed_wide < 0)
                     output_sample <= 12'd0;
@@ -399,6 +497,8 @@ module zero_crossing_dds #(
     end
 
     initial begin
+        if (DOUBLE_TIMEOUT_SAMPLES < 1)
+            $display("ERROR: DOUBLE_TIMEOUT_SAMPLES must be >= 1");
         if (ADC_ZERO_CODE < 0 || ADC_ZERO_CODE > 4095)
             $display("ERROR: invalid ADC zero code");
         if (LOST_CROSSING_SAMPLES > 65534)

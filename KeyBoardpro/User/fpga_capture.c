@@ -8,10 +8,13 @@
 #define FPGA_TYPE_CAPTURE       (0x01U)
 #define FPGA_TYPE_SET_DELAY     (0x03U)
 #define FPGA_TYPE_SET_OUTPUT    (0x04U)
+#define FPGA_TYPE_ARM_DOUBLE    (0x05U)
 #define FPGA_TYPE_SAMPLES       (0x81U)
 #define FPGA_TYPE_OUTPUT_ACK    (0x84U)
+#define FPGA_TYPE_DOUBLE_ACK    (0x85U)
 #define FPGA_PAYLOAD_SIZE       (8U + MEASUREMENT_FFT_SIZE * 2U)
 #define FPGA_BYTE_TIMEOUT_LOOPS (4000000UL)
+#define FPGA_DOUBLE_TIMEOUT_LOOPS (120000000UL)
 
 static uint16_t crc16Update(uint16_t crc, uint8_t value)
 {
@@ -35,7 +38,99 @@ static bool receiveByte(uint8_t *value)
     return true;
 }
 
+static bool receiveByteLong(uint8_t *value)
+{
+    uint32_t timeout = FPGA_DOUBLE_TIMEOUT_LOOPS;
+    while (DL_UART_Main_isRXFIFOEmpty(FPGA_UART_INST)) {
+        if (--timeout == 0U)
+            return false;
+    }
+    *value = DL_UART_Main_receiveData(FPGA_UART_INST);
+    return true;
+}
+
 static bool readCheckedByte(uint8_t *value, uint16_t *crc);
+
+static bool readCheckedByteLong(uint8_t *value, uint16_t *crc)
+{
+    if (!receiveByteLong(value))
+        return false;
+    *crc = crc16Update(*crc, *value);
+    return true;
+}
+
+static bool readU32Long(uint32_t *value, uint16_t *crc)
+{
+    uint8_t bytes[4];
+    uint8_t index;
+    for (index = 0U; index < 4U; index++) {
+        if (!readCheckedByteLong(&bytes[index], crc))
+            return false;
+    }
+    *value = (uint32_t) bytes[0] |
+        ((uint32_t) bytes[1] << 8) |
+        ((uint32_t) bytes[2] << 16) |
+        ((uint32_t) bytes[3] << 24);
+    return true;
+}
+
+FPGA_CaptureStatus FPGA_Capture_ArmDouble(
+    uint8_t sequence, FPGA_DoubleResult *result)
+{
+    uint8_t frame[8];
+    uint8_t header[4];
+    uint8_t value;
+    uint8_t previous = 0U;
+    uint8_t crcLow;
+    uint8_t crcHigh;
+    uint8_t index;
+    uint16_t crc = 0xFFFFU;
+    uint16_t receivedCrc;
+
+    while (!DL_UART_Main_isRXFIFOEmpty(FPGA_UART_INST))
+        (void) DL_UART_Main_receiveData(FPGA_UART_INST);
+
+    frame[0] = 0xA5U;
+    frame[1] = 0x5AU;
+    frame[2] = FPGA_TYPE_ARM_DOUBLE;
+    frame[3] = sequence;
+    frame[4] = 0U;
+    frame[5] = 0U;
+    for (index = 2U; index < 6U; index++)
+        crc = crc16Update(crc, frame[index]);
+    frame[6] = (uint8_t) crc;
+    frame[7] = (uint8_t) (crc >> 8);
+    for (index = 0U; index < sizeof(frame); index++)
+        DL_UART_Main_transmitDataBlocking(FPGA_UART_INST, frame[index]);
+
+    do {
+        if (!receiveByteLong(&value))
+            return FPGA_CAPTURE_TIMEOUT;
+        if (previous == 0xA5U && value == 0x5AU)
+            break;
+        previous = value;
+    } while (1);
+
+    crc = 0xFFFFU;
+    for (index = 0U; index < sizeof(header); index++) {
+        if (!readCheckedByteLong(&header[index], &crc))
+            return FPGA_CAPTURE_TIMEOUT;
+    }
+    if (header[0] != FPGA_TYPE_DOUBLE_ACK ||
+        header[1] != sequence || header[2] != 17U || header[3] != 0U)
+        return FPGA_CAPTURE_FORMAT_ERROR;
+    if (!readCheckedByteLong(&result->status, &crc) ||
+        !readU32Long(&result->appliedSampleCounter, &crc) ||
+        !readU32Long(&result->oldPhaseStep, &crc) ||
+        !readU32Long(&result->newPhaseStep, &crc) ||
+        !readU32Long(&result->commitPhase, &crc))
+        return FPGA_CAPTURE_TIMEOUT;
+    if (!receiveByteLong(&crcLow) || !receiveByteLong(&crcHigh))
+        return FPGA_CAPTURE_TIMEOUT;
+    receivedCrc = (uint16_t) crcLow | ((uint16_t) crcHigh << 8);
+    return receivedCrc == crc ?
+        FPGA_CAPTURE_OK : FPGA_CAPTURE_CRC_ERROR;
+}
 
 static void sendCaptureCommand(uint8_t sequence)
 {

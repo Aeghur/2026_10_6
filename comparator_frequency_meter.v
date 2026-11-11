@@ -6,7 +6,7 @@ module comparator_frequency_meter #(
     parameter integer SAMPLE_HZ = 25_000_000,
     parameter integer GATE_HZ = 10,
     parameter integer MIN_HZ = 1_000,
-    parameter integer MAX_HZ = 100_000
+    parameter integer MAX_HZ = 110_000
 ) (
     input  wire        clk,
     input  wire        rst,

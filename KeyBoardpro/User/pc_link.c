@@ -6,7 +6,9 @@
 #define FRAME_TYPE_SET_MODE  (0x12U)
 #define FRAME_TYPE_SET_TARGET (0x13U)
 #define FRAME_TYPE_SET_WAVEFORM (0x14U)
+#define FRAME_TYPE_ARM_DOUBLE (0x15U)
 #define FRAME_TYPE_TARGET_ACK (0x93U)
+#define FRAME_TYPE_DOUBLE_ACK (0x94U)
 #define FRAME_TYPE_ERROR   (0xE0U)
 
 static volatile bool gPhasePending;
@@ -20,6 +22,8 @@ static volatile uint16_t gTargetPhaseCentiDegrees;
 static volatile uint8_t gTargetAmplitudeCode;
 static volatile uint8_t gTargetWaveform;
 static volatile uint16_t gTargetDecayMicroseconds;
+static volatile bool gDoublePending;
+static volatile uint8_t gDoubleSequence;
 static uint8_t gRxState;
 static uint8_t gRxType;
 static uint8_t gRxSequence;
@@ -88,9 +92,23 @@ void PC_Link_Init(void)
     gPhasePending = false;
     gModePending = false;
     gTargetPending = false;
+    gDoublePending = false;
     gRxState = 0U;
     NVIC_ClearPendingIRQ(PC_UART_INST_INT_IRQN);
     NVIC_EnableIRQ(PC_UART_INST_INT_IRQN);
+}
+
+bool PC_Link_TakeDoubleRequest(uint8_t *sequence)
+{
+    __disable_irq();
+    if (!gDoublePending) {
+        __enable_irq();
+        return false;
+    }
+    *sequence = gDoubleSequence;
+    gDoublePending = false;
+    __enable_irq();
+    return true;
 }
 
 bool PC_Link_TakeTargetRequest(
@@ -168,6 +186,20 @@ void PC_Link_SendError(uint8_t sequence, uint16_t errorCode)
     endFrame(crc);
 }
 
+void PC_Link_SendDoubleAck(
+    uint8_t sequence, uint32_t appliedSampleCounter,
+    uint32_t oldPhaseStep, uint32_t newPhaseStep, uint32_t commitPhase)
+{
+    uint16_t crc;
+    beginFrame(FRAME_TYPE_DOUBLE_ACK, sequence, 17U, &crc);
+    sendCheckedByte(0U, &crc);
+    sendU32(appliedSampleCounter, &crc);
+    sendU32(oldPhaseStep, &crc);
+    sendU32(newPhaseStep, &crc);
+    sendU32(commitPhase, &crc);
+    endFrame(crc);
+}
+
 void UART1_IRQHandler(void)
 {
     while (!DL_UART_Main_isRXFIFOEmpty(PC_UART_INST)) {
@@ -184,7 +216,8 @@ void UART1_IRQHandler(void)
                 if (value == FRAME_TYPE_SET_PHASE ||
                     value == FRAME_TYPE_SET_MODE ||
                     value == FRAME_TYPE_SET_TARGET ||
-                    value == FRAME_TYPE_SET_WAVEFORM) {
+                    value == FRAME_TYPE_SET_WAVEFORM ||
+                    value == FRAME_TYPE_ARM_DOUBLE) {
                     gRxType = value;
                     gRxCrc = crc16Update(0xFFFFU, value);
                     gRxLength = 0U;
@@ -213,8 +246,12 @@ void UART1_IRQHandler(void)
                     (gRxType == FRAME_TYPE_SET_TARGET &&
                      gRxLength != 7U) ||
                     (gRxType == FRAME_TYPE_SET_WAVEFORM &&
-                     gRxLength != 8U && gRxLength != 10U)) {
+                     gRxLength != 8U && gRxLength != 10U) ||
+                    (gRxType == FRAME_TYPE_ARM_DOUBLE &&
+                     gRxLength != 0U)) {
                     gRxState = 0U;
+                } else if (gRxLength == 0U) {
+                    gRxState = 8U;
                 } else {
                     gRxState = 6U;
                 }
@@ -298,6 +335,12 @@ void UART1_IRQHandler(void)
                             gTargetDecayMicroseconds = decayMicroseconds;
                             gTargetSequence = gRxSequence;
                             gTargetPending = true;
+                        }
+                    } else if (gRxType == FRAME_TYPE_ARM_DOUBLE &&
+                               gRxLength == 0U) {
+                        if (!gDoublePending) {
+                            gDoubleSequence = gRxSequence;
+                            gDoublePending = true;
                         }
                     }
                 }

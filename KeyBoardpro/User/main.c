@@ -83,6 +83,7 @@ int main(void)
     uint8_t requestedMode;
     uint8_t targetSequence = 0U;
     uint8_t fpgaSequence = 0U;
+    uint8_t doubleSequence = 0U;
     uint32_t activePhaseStep = 0xFFFFFFFFUL;
     uint32_t activePhaseLag = 0xFFFFFFFFUL;
     uint8_t activeMode = 0xFFU;
@@ -90,6 +91,7 @@ int main(void)
     uint32_t activeDecayScaleQ16 = 0xFFFFFFFFUL;
     bool controlChanged = true;
     bool targetAckPending = false;
+    bool doubleRequestPending = false;
 
     SYSCFG_DL_init();
     MSP_UART_Link_Init();
@@ -127,6 +129,8 @@ int main(void)
             controlChanged = true;
             targetAckPending = true;
         }
+        if (PC_Link_TakeDoubleRequest(&doubleSequence))
+            doubleRequestPending = true;
 
         if (controlChanged) {
             uint32_t phaseStep;
@@ -181,6 +185,36 @@ int main(void)
             }
             Keypad_Control_RefreshDisplay(targetMode, targetPhase);
             controlChanged = false;
+        }
+
+        if (doubleRequestPending) {
+            FPGA_DoubleResult result;
+            FPGA_CaptureStatus fpgaStatus;
+            fpgaSequence++;
+            fpgaStatus = FPGA_Capture_ArmDouble(fpgaSequence, &result);
+            if (fpgaStatus != FPGA_CAPTURE_OK) {
+                PC_Link_SendError(doubleSequence, (uint16_t) fpgaStatus);
+            } else if (result.status != 0U) {
+                /* FPGA status 1/2/3 maps to host BUSY/INVALID/TIMEOUT 5/6/7. */
+                PC_Link_SendError(
+                    doubleSequence, (uint16_t) (4U + result.status));
+            } else if (result.newPhaseStep !=
+                       (uint32_t) (result.oldPhaseStep << 1)) {
+                PC_Link_SendError(
+                    doubleSequence, (uint16_t) FPGA_CAPTURE_FORMAT_ERROR);
+            } else {
+                activePhaseStep = result.newPhaseStep;
+                targetFrequencyMilliHz =
+                    actualFrequencyMilliHz(result.newPhaseStep);
+                targetMode |= MEASUREMENT_MODE_X2_MASK;
+                activeMode = targetMode;
+                PC_Link_SendDoubleAck(
+                    doubleSequence, result.appliedSampleCounter,
+                    result.oldPhaseStep, result.newPhaseStep,
+                    result.commitPhase);
+                Keypad_Control_RefreshDisplay(targetMode, targetPhase);
+            }
+            doubleRequestPending = false;
         }
     }
 }

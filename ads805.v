@@ -15,6 +15,7 @@ module ads805 #(
     parameter integer DAC_GAIN_Q16    = 270600,
     parameter integer DAC_INVERT      = 0,
     parameter integer DDS_PIPELINE_ADVANCE_SAMPLES = 10,
+    parameter integer DOUBLE_TIMEOUT_SAMPLES = SAMPLE_HZ / 10,
     // DDS 0-degree sweep, 1...100 kHz, 2026-10-06.
     parameter integer DDS_PHASE_CALIBRATION_LAG_CDEG = 196,
     parameter integer DDS_PHASE_CALIBRATION_DELAY_SAMPLES = 2
@@ -113,10 +114,28 @@ module ads805 #(
     reg [31:0] configured_phase_lag = 32'd0;
     reg [15:0] configured_decay_start = 16'he665;
     reg [31:0] configured_decay_scale_q16 = 32'd327650;
+    reg dds_arm_double = 1'b0;
     wire [11:0] dds_sample_data;
     wire dds_sample_valid;
     wire dds_locked;
     wire dds_signal_present;
+    wire dds_double_busy;
+    wire dds_double_committed;
+    wire dds_double_output_applied;
+    wire dds_double_error;
+    wire [1:0] dds_double_error_code;
+    wire [31:0] dds_double_sample_counter;
+    wire [31:0] dds_double_old_step;
+    wire [31:0] dds_double_new_step;
+    wire [31:0] dds_double_commit_phase;
+    // Rounded Q38 tuning-word limits shared by normal SET_OUTPUT validation
+    // and the atomic 1x-to-2x transaction.
+    localparam [63:0] FREE_RUN_MIN_STEP =
+        (64'd250 * 64'd274877906944 + SAMPLE_HZ / 2) / SAMPLE_HZ;
+    localparam [63:0] FREE_RUN_MAX_STEP =
+        (64'd210000 * 64'd274877906944 + SAMPLE_HZ / 2) / SAMPLE_HZ;
+    localparam [63:0] DECAY_PULSE_STEP =
+        (64'd100 * 64'd274877906944 + SAMPLE_HZ / 2) / SAMPLE_HZ;
     wire [31:0] dds_phase_step = output_free_run ? configured_phase_step :
         (output_frequency_x2 ?
          {measured_phase_step[30:0], 1'b0} : measured_phase_step);
@@ -126,7 +145,9 @@ module ads805 #(
         .PIPELINE_ADVANCE_SAMPLES(DDS_PIPELINE_ADVANCE_SAMPLES),
         .PHASE_CALIBRATION_LAG_CDEG(DDS_PHASE_CALIBRATION_LAG_CDEG),
         .PHASE_CALIBRATION_DELAY_SAMPLES(
-            DDS_PHASE_CALIBRATION_DELAY_SAMPLES)
+            DDS_PHASE_CALIBRATION_DELAY_SAMPLES),
+        .MAX_FREE_RUN_FTW(FREE_RUN_MAX_STEP[31:0]),
+        .DOUBLE_TIMEOUT_SAMPLES(DOUBLE_TIMEOUT_SAMPLES)
     ) zero_crossing_dds_inst (
         .clk(clk_50m), .rst(rst), .enable(output_mode_dds),
         .free_run(output_free_run),
@@ -140,11 +161,21 @@ module ads805 #(
         .waveform_saw(output_waveform_saw),
         .saw_reverse(output_saw_reverse),
         .waveform_decay(output_waveform_decay),
+        .arm_double(dds_arm_double),
         .amplitude_scale_code(output_amplitude_code),
         .reference_edge(comparator_rising_edge),
         .sample_valid(sample_strobe), .sample_data(sample_data),
         .output_valid(dds_sample_valid), .output_sample(dds_sample_data),
-        .locked(dds_locked), .signal_present(dds_signal_present)
+        .locked(dds_locked), .signal_present(dds_signal_present),
+        .double_busy(dds_double_busy),
+        .double_committed(dds_double_committed),
+        .double_output_applied(dds_double_output_applied),
+        .double_error(dds_double_error),
+        .double_error_code(dds_double_error_code),
+        .double_sample_counter(dds_double_sample_counter),
+        .double_old_step(dds_double_old_step),
+        .double_new_step(dds_double_new_step),
+        .double_commit_phase(dds_double_commit_phase)
     );
 
     wire selected_sample_valid = output_mode_dds ?
@@ -158,6 +189,9 @@ module ads805 #(
     wire [13:0] mapped_dac_code;
     wire mapped_valid;
     wire mapper_clipped;
+    reg double_mapper_tag_stage1 = 1'b0;
+    reg double_mapper_tag_stage2 = 1'b0;
+    reg double_dac_applied = 1'b0;
     adc_dac_voltage_mapper #(
         .ADC_ZERO_CODE(ADC_ZERO_CODE),
         .DAC_ZERO_CODE(DAC_ZERO_CODE),
@@ -169,6 +203,21 @@ module ads805 #(
         .mapped_valid(mapped_valid), .dac_code(mapped_dac_code),
         .clipped(mapper_clipped)
     );
+
+    // Carry the first-new-frequency sample tag through the same two mapper
+    // registers.  One additional clock places the applied event after the
+    // falling edge on which dac904_output updates the physical data pins.
+    always @(posedge clk_50m) begin
+        if (rst) begin
+            double_mapper_tag_stage1 <= 1'b0;
+            double_mapper_tag_stage2 <= 1'b0;
+            double_dac_applied <= 1'b0;
+        end else begin
+            double_mapper_tag_stage1 <= dds_double_output_applied;
+            double_mapper_tag_stage2 <= double_mapper_tag_stage1;
+            double_dac_applied <= double_mapper_tag_stage2;
+        end
+    end
 
     dac904_output #(.RESET_CODE(DAC_ZERO_CODE)) dac_output_inst (
         .rst(rst), .clk(clk_50m), .sample_clk(adc_clk),
@@ -192,7 +241,8 @@ module ads805 #(
         end
     endfunction
 
-    // Receive CAPTURE (0x01), SET_DELAY (0x03) and SET_OUTPUT (0x04).
+    // Receive CAPTURE (0x01), SET_DELAY (0x03), SET_OUTPUT (0x04), and the
+    // dedicated ARM_DOUBLE_AT_FALLING_ZERO transaction (0x05).
     // SET_OUTPUT payload remains mode:u8, phase_step:u32LE, phase_lag:u32LE.
     // Mode bit 4 selects free-running DDS.  In that mode phase_step is the
     // commanded output frequency and neither T14 nor the ADC input is needed.
@@ -219,13 +269,6 @@ module ads805 #(
     reg pending_saw_reverse = 1'b0;
     reg [1:0] pending_amplitude_code = 2'd0;
     reg [31:0] pending_phase_step = 32'd0;
-    // Same rounded Q38 tuning-word limits as the MSPM0 (mHz protocol).
-    localparam [63:0] FREE_RUN_MIN_STEP =
-        (64'd250 * 64'd274877906944 + SAMPLE_HZ / 2) / SAMPLE_HZ;
-    localparam [63:0] FREE_RUN_MAX_STEP =
-        (64'd210000 * 64'd274877906944 + SAMPLE_HZ / 2) / SAMPLE_HZ;
-    localparam [63:0] DECAY_PULSE_STEP =
-        (64'd100 * 64'd274877906944 + SAMPLE_HZ / 2) / SAMPLE_HZ;
     wire pending_waveform_decay =
         pending_saw_reverse && !pending_waveform_saw;
     wire pending_frequency_valid = !pending_free_run ||
@@ -239,16 +282,36 @@ module ads805 #(
     reg [31:0] pending_decay_scale_q16 = 32'd327650;
     reg capture_request = 1'b0;
     reg output_ack_request = 1'b0;
+    reg double_ack_request = 1'b0;
+    reg double_transaction_active = 1'b0;
+    reg [7:0] double_transaction_seq = 8'd0;
+    reg [7:0] double_ack_status = 8'd0;
+    reg [7:0] double_ack_request_seq = 8'd0;
+    reg [31:0] double_ack_sample_counter = 32'd0;
+    reg [31:0] double_ack_old_step = 32'd0;
+    reg [31:0] double_ack_new_step = 32'd0;
+    reg [31:0] double_ack_commit_phase = 32'd0;
+    wire arm_double_current_valid =
+        output_mode_dds && output_free_run && !output_frequency_x2 &&
+        !output_waveform_saw && !output_waveform_decay && dds_locked &&
+        configured_phase_step != 0 &&
+        configured_phase_step <= (FREE_RUN_MAX_STEP[31:0] >> 1);
     wire request_crc_ok = ({rx_byte, rx_crc_low} == rx_crc);
 
     always @(posedge clk_50m) begin
         capture_request <= 1'b0;
         output_ack_request <= 1'b0;
+        double_ack_request <= 1'b0;
+        dds_arm_double <= 1'b0;
         delay_config_valid <= 1'b0;
         dds_config_valid <= 1'b0;
         if (rst || rx_framing_error) begin
             rx_state <= 4'd0;
             rx_crc   <= 16'hffff;
+            if (rst) begin
+                double_transaction_active <= 1'b0;
+                double_transaction_seq <= 8'd0;
+            end
         end else if (rx_valid) begin
             case (rx_state)
                 0: rx_state <= (rx_byte == 8'ha5) ? 1 : 0;
@@ -256,7 +319,7 @@ module ads805 #(
                               (rx_byte == 8'ha5) ? 1 : 0;
                 2: begin
                     if (rx_byte == 8'h01 || rx_byte == 8'h03 ||
-                        rx_byte == 8'h04) begin
+                        rx_byte == 8'h04 || rx_byte == 8'h05) begin
                         request_type <= rx_byte;
                         rx_crc   <= crc16_next(16'hffff, rx_byte);
                         rx_state <= 3;
@@ -283,7 +346,9 @@ module ads805 #(
                          rx_payload_length[7:0] != 2) ||
                         (request_type == 8'h04 &&
                          rx_payload_length[7:0] != 9 &&
-                         rx_payload_length[7:0] != 15))
+                          rx_payload_length[7:0] != 15) ||
+                        (request_type == 8'h05 &&
+                         rx_payload_length[7:0] != 0))
                         rx_state <= 0;
                     else if (rx_payload_length[7:0] == 0)
                         rx_state <= 7;
@@ -342,6 +407,28 @@ module ads805 #(
                             configured_delay <=
                                 pending_delay[DELAY_ADDR_WIDTH-1:0];
                             delay_config_valid <= 1'b1;
+                        end else if (request_type == 8'h05) begin
+                            if (double_transaction_active) begin
+                                double_ack_status <= 8'd1;
+                                double_ack_request_seq <= request_seq;
+                                double_ack_sample_counter <= 32'd0;
+                                double_ack_old_step <= 32'd0;
+                                double_ack_new_step <= 32'd0;
+                                double_ack_commit_phase <= 32'd0;
+                                double_ack_request <= 1'b1;
+                            end else if (!arm_double_current_valid) begin
+                                double_ack_status <= 8'd2;
+                                double_ack_request_seq <= request_seq;
+                                double_ack_sample_counter <= 32'd0;
+                                double_ack_old_step <= configured_phase_step;
+                                double_ack_new_step <= 32'd0;
+                                double_ack_commit_phase <= 32'd0;
+                                double_ack_request <= 1'b1;
+                            end else begin
+                                double_transaction_active <= 1'b1;
+                                double_transaction_seq <= request_seq;
+                                dds_arm_double <= 1'b1;
+                            end
                         end else if (pending_frequency_valid) begin
                             output_mode_dds <= pending_mode_dds;
                             output_frequency_x2 <= pending_frequency_x2;
@@ -362,6 +449,31 @@ module ads805 #(
                 end
                 default: rx_state <= 0;
             endcase
+        end
+
+        if (!rst && double_transaction_active && dds_double_committed) begin
+            configured_phase_step <= dds_double_new_step;
+            output_frequency_x2 <= 1'b1;
+        end
+        if (!rst && double_transaction_active && dds_double_error) begin
+            double_transaction_active <= 1'b0;
+            double_ack_status <= {6'd0, dds_double_error_code};
+            double_ack_request_seq <= double_transaction_seq;
+            double_ack_sample_counter <= 32'd0;
+            double_ack_old_step <= configured_phase_step;
+            double_ack_new_step <= 32'd0;
+            double_ack_commit_phase <= 32'd0;
+            double_ack_request <= 1'b1;
+        end else if (!rst && double_transaction_active &&
+                     double_dac_applied) begin
+            double_transaction_active <= 1'b0;
+            double_ack_status <= 8'd0;
+            double_ack_request_seq <= double_transaction_seq;
+            double_ack_sample_counter <= dds_double_sample_counter;
+            double_ack_old_step <= dds_double_old_step;
+            double_ack_new_step <= dds_double_new_step;
+            double_ack_commit_phase <= dds_double_commit_phase;
+            double_ack_request <= 1'b1;
         end
     end
 
@@ -424,8 +536,21 @@ module ads805 #(
 
     reg tx_active = 1'b0;
     reg tx_ack_frame = 1'b0;
+    reg tx_double_frame = 1'b0;
     reg output_ack_pending = 1'b0;
+    reg double_ack_pending = 1'b0;
     reg [7:0] output_ack_seq = 8'd0;
+    reg [7:0] double_ack_pending_seq = 8'd0;
+    reg [7:0] double_ack_pending_status = 8'd0;
+    reg [31:0] double_ack_pending_sample_counter = 32'd0;
+    reg [31:0] double_ack_pending_old_step = 32'd0;
+    reg [31:0] double_ack_pending_new_step = 32'd0;
+    reg [31:0] double_ack_pending_commit_phase = 32'd0;
+    reg [7:0] tx_double_status = 8'd0;
+    reg [31:0] tx_double_sample_counter = 32'd0;
+    reg [31:0] tx_double_old_step = 32'd0;
+    reg [31:0] tx_double_new_step = 32'd0;
+    reg [31:0] tx_double_commit_phase = 32'd0;
     reg [7:0] tx_sequence = 8'd0;
     reg [15:0] tx_index = 16'd0;
     reg [15:0] tx_crc = 16'hffff;
@@ -433,15 +558,45 @@ module ads805 #(
     reg tx_start = 1'b0;
     wire tx_busy;
     wire tx_done;
-    wire [15:0] tx_frame_length = tx_ack_frame ? 16'd8 : FRAME_LENGTH;
+    wire [15:0] tx_frame_length = tx_double_frame ? 16'd25 :
+        (tx_ack_frame ? 16'd8 : FRAME_LENGTH);
 
     function [7:0] frame_byte;
         input [15:0] index;
         input [7:0] sequence_value;
         input [11:0] sample_value;
         input ack_frame;
+        input double_frame;
         begin
-            if (ack_frame) begin
+            if (double_frame) begin
+                case (index)
+                    0: frame_byte = 8'ha5;
+                    1: frame_byte = 8'h5a;
+                    2: frame_byte = 8'h85;
+                    3: frame_byte = sequence_value;
+                    4: frame_byte = 8'd17;
+                    5: frame_byte = 8'd0;
+                    6: frame_byte = tx_double_status;
+                    7: frame_byte = tx_double_sample_counter[7:0];
+                    8: frame_byte = tx_double_sample_counter[15:8];
+                    9: frame_byte = tx_double_sample_counter[23:16];
+                    10: frame_byte = tx_double_sample_counter[31:24];
+                    11: frame_byte = tx_double_old_step[7:0];
+                    12: frame_byte = tx_double_old_step[15:8];
+                    13: frame_byte = tx_double_old_step[23:16];
+                    14: frame_byte = tx_double_old_step[31:24];
+                    15: frame_byte = tx_double_new_step[7:0];
+                    16: frame_byte = tx_double_new_step[15:8];
+                    17: frame_byte = tx_double_new_step[23:16];
+                    18: frame_byte = tx_double_new_step[31:24];
+                    19: frame_byte = tx_double_commit_phase[7:0];
+                    20: frame_byte = tx_double_commit_phase[15:8];
+                    21: frame_byte = tx_double_commit_phase[23:16];
+                    22: frame_byte = tx_double_commit_phase[31:24];
+                    23: frame_byte = tx_crc[7:0];
+                    default: frame_byte = tx_crc[15:8];
+                endcase
+            end else if (ack_frame) begin
                 case (index)
                     0: frame_byte = 8'ha5;
                     1: frame_byte = 8'h5a;
@@ -487,12 +642,53 @@ module ads805 #(
         if (rst) begin
             tx_active <= 1'b0;
             tx_ack_frame <= 1'b0;
+            tx_double_frame <= 1'b0;
             output_ack_pending <= 1'b0;
+            double_ack_pending <= 1'b0;
             output_ack_seq <= 8'd0;
+            double_ack_pending_seq <= 8'd0;
+            double_ack_pending_status <= 8'd0;
+            double_ack_pending_sample_counter <= 32'd0;
+            double_ack_pending_old_step <= 32'd0;
+            double_ack_pending_new_step <= 32'd0;
+            double_ack_pending_commit_phase <= 32'd0;
+            tx_double_status <= 8'd0;
+            tx_double_sample_counter <= 32'd0;
+            tx_double_old_step <= 32'd0;
+            tx_double_new_step <= 32'd0;
+            tx_double_commit_phase <= 32'd0;
             tx_sequence <= 8'd0;
             tx_index  <= 16'd0;
             tx_crc    <= 16'hffff;
             read_addr <= {ADDR_WIDTH{1'b0}};
+        end else if (double_ack_request && tx_active) begin
+            double_ack_pending <= 1'b1;
+            double_ack_pending_seq <= double_ack_request_seq;
+            double_ack_pending_status <= double_ack_status;
+            double_ack_pending_sample_counter <= double_ack_sample_counter;
+            double_ack_pending_old_step <= double_ack_old_step;
+            double_ack_pending_new_step <= double_ack_new_step;
+            double_ack_pending_commit_phase <= double_ack_commit_phase;
+        end else if ((double_ack_request || double_ack_pending) &&
+                     !tx_active) begin
+            tx_active <= 1'b1;
+            tx_ack_frame <= 1'b0;
+            tx_double_frame <= 1'b1;
+            tx_sequence <= double_ack_request ? double_ack_request_seq :
+                double_ack_pending_seq;
+            tx_double_status <= double_ack_request ? double_ack_status :
+                double_ack_pending_status;
+            tx_double_sample_counter <= double_ack_request ?
+                double_ack_sample_counter : double_ack_pending_sample_counter;
+            tx_double_old_step <= double_ack_request ? double_ack_old_step :
+                double_ack_pending_old_step;
+            tx_double_new_step <= double_ack_request ? double_ack_new_step :
+                double_ack_pending_new_step;
+            tx_double_commit_phase <= double_ack_request ?
+                double_ack_commit_phase : double_ack_pending_commit_phase;
+            double_ack_pending <= 1'b0;
+            tx_index <= 16'd0;
+            tx_crc <= 16'hffff;
         end else if (output_ack_request && tx_active) begin
             output_ack_pending <= 1'b1;
             output_ack_seq <= request_seq;
@@ -500,6 +696,7 @@ module ads805 #(
                      !tx_active) begin
             tx_active <= 1'b1;
             tx_ack_frame <= 1'b1;
+            tx_double_frame <= 1'b0;
             tx_sequence <= output_ack_request ? request_seq : output_ack_seq;
             output_ack_pending <= 1'b0;
             tx_index  <= 16'd0;
@@ -507,6 +704,7 @@ module ads805 #(
         end else if (capture_complete && !tx_active) begin
             tx_active <= 1'b1;
             tx_ack_frame <= 1'b0;
+            tx_double_frame <= 1'b0;
             tx_sequence <= capture_seq;
             tx_index  <= 16'd0;
             tx_crc    <= 16'hffff;
@@ -518,14 +716,16 @@ module ads805 #(
                 tx_index <= tx_index + 1'b1;
         end else if (tx_active && !tx_busy && !tx_start) begin
             tx_data  <= frame_byte(
-                tx_index, tx_sequence, read_data, tx_ack_frame);
+                tx_index, tx_sequence, read_data, tx_ack_frame,
+                tx_double_frame);
             tx_start <= 1'b1;
             if (tx_index >= 2 && tx_index < tx_frame_length - 2)
                 tx_crc <= crc16_next(
                     tx_crc, frame_byte(
-                        tx_index, tx_sequence, read_data, tx_ack_frame));
+                        tx_index, tx_sequence, read_data, tx_ack_frame,
+                        tx_double_frame));
             // Sample bytes begin at index 14. Advance after each high byte.
-            if (!tx_ack_frame && tx_index >= 15 &&
+            if (!tx_ack_frame && !tx_double_frame && tx_index >= 15 &&
                 tx_index < FRAME_LENGTH - 2 &&
                 tx_index[0] && read_addr != CAPTURE_SAMPLES - 1)
                 read_addr <= read_addr + 1'b1;

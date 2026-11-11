@@ -10,10 +10,13 @@ from protocol import (
     TYPE_PC_SET_MODE,
     TYPE_PC_SET_TARGET,
     TYPE_PC_SET_WAVEFORM,
+    TYPE_PC_ARM_DOUBLE,
+    TYPE_PC_DOUBLE_ACK,
     TYPE_PC_TARGET_ACK,
     TYPE_PC_RESULT,
     crc16_ccitt,
     decode_error,
+    decode_double_ack,
     decode_result,
     decode_target_ack,
     encode_frame,
@@ -106,6 +109,21 @@ class ProtocolTests(unittest.TestCase):
             "<IHBBH", 100_000, 0, 0, 0x51, 750)
         decay_ack = decode_target_ack(decay_payload)
         self.assertEqual(decay_ack.decay_microseconds, 750)
+
+    def test_double_ack_layout(self) -> None:
+        payload = struct.pack(
+            "<BIIII", 0, 123456, 0x40000000, 0x80000000, 0x7F000000)
+        frame = FrameDecoder().feed(
+            encode_frame(TYPE_PC_DOUBLE_ACK, 11, payload)
+        )[0]
+        ack = decode_double_ack(frame.payload)
+        self.assertEqual(ack.status, 0)
+        self.assertEqual(ack.applied_sample_counter, 123456)
+        self.assertEqual(ack.new_phase_step, ack.old_phase_step << 1)
+        self.assertEqual(
+            FrameDecoder().feed(encode_frame(TYPE_PC_ARM_DOUBLE, 12))[0].payload,
+            b"",
+        )
 
     def test_mspm0_error_layout(self) -> None:
         frame = encode_frame(TYPE_ERROR, 4, struct.pack("<H", 3))

@@ -10,11 +10,11 @@ import threading
 import time
 
 from msp_wave_link import encode_waveform_payload, MSPM0LinkError
-from protocol import TargetAck
+from protocol import DoubleAck, TargetAck
 
 MARKER = "WAVE_JSON:"
 REMOTE_WORKER = r'''
-import sys, os, json, shutil, subprocess
+import sys, os, json, shutil, struct, subprocess, time
 
 def reply(value):
     print("WAVE_JSON:" + json.dumps(value), flush=True)
@@ -24,7 +24,7 @@ try:
     os.chdir(sys.argv[1])
     sys.path.insert(0, os.getcwd())
     from msp_wave_link import MSPM0WaveLink, encode_waveform_payload
-    from protocol import TYPE_PC_SET_WAVEFORM, encode_frame
+    from protocol import FrameDecoder, TYPE_PC_SET_WAVEFORM, encode_frame
     if not shutil.which("fuser"):
         raise RuntimeError("缺少 fuser，无法检查串口占用，请安装 psmisc")
     check = subprocess.run(["fuser", sys.argv[2]], capture_output=True)
@@ -41,6 +41,33 @@ try:
         if request.get("close"):
             break
         try:
+            if request.get("operation") == "arm_double":
+                with link._lock:
+                    link._sequence = (link._sequence % 255) + 1
+                    sequence = link._sequence
+                    link._serial.reset_input_buffer()
+                    link._serial.write(encode_frame(0x15, sequence))
+                    link._serial.flush()
+                    decoder = FrameDecoder(max_payload=64)
+                    deadline = time.monotonic() + 3.0
+                    result = None
+                    while time.monotonic() < deadline and result is None:
+                        block = link._serial.read(link._serial.in_waiting or 1)
+                        for frame in decoder.feed(block):
+                            if frame.sequence != sequence:
+                                continue
+                            if frame.frame_type == 0xE0:
+                                code = struct.unpack("<H", frame.payload)[0]
+                                raise RuntimeError("MSPM0错误%d" % code)
+                            if frame.frame_type == 0x94 and len(frame.payload) == 17:
+                                values = struct.unpack("<BIIII", frame.payload)
+                                result = dict(zip(("status", "applied_sample_counter",
+                                    "old_phase_step", "new_phase_step",
+                                    "commit_phase"), values))
+                    if result is None:
+                        raise RuntimeError("等待下降过零倍频及DAC生效确认超时")
+                reply({"double_ack": result})
+                continue
             wait_for_confirmation = request.pop("wait_for_confirmation", True)
             if wait_for_confirmation:
                 ack = link.set_waveform(**request)
@@ -179,6 +206,23 @@ class RadxaWaveLink:
         if (waveform == "decay_pulse" and
                 ack.decay_microseconds != decay_microseconds):
             raise MSPM0LinkError("Radxa确认的下降时间与请求不匹配")
+        return ack
+
+    def arm_double_at_falling_zero(self):
+        """Wait for the FPGA's phase-deterministic 1x-to-2x DAC-applied ACK."""
+        if self.process is None or self.process.poll() is not None:
+            raise MSPM0LinkError("尚未连接 Radxa")
+        self.process.stdin.write(json.dumps({"operation": "arm_double"}) + "\n")
+        self.process.stdin.flush()
+        response = self._receive()
+        try:
+            ack = DoubleAck(**response["double_ack"])
+        except (KeyError, TypeError) as error:
+            raise MSPM0LinkError("Radxa 返回的倍频确认格式无效") from error
+        if ack.status != 0:
+            raise MSPM0LinkError(f"FPGA倍频ACK状态异常：{ack.status}")
+        if ack.new_phase_step != ((ack.old_phase_step << 1) & 0xFFFFFFFF):
+            raise MSPM0LinkError("FPGA倍频ACK的FTW不是精确2倍")
         return ack
 
     def close(self):

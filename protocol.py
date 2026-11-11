@@ -10,8 +10,10 @@ TYPE_PC_SET_PHASE = 0x11
 TYPE_PC_SET_MODE = 0x12
 TYPE_PC_SET_TARGET = 0x13
 TYPE_PC_SET_WAVEFORM = 0x14
+TYPE_PC_ARM_DOUBLE = 0x15
 TYPE_PC_RESULT = 0x90
 TYPE_PC_TARGET_ACK = 0x93
+TYPE_PC_DOUBLE_ACK = 0x94
 TYPE_ERROR = 0xE0
 MAX_PAYLOAD = 20_000
 
@@ -111,12 +113,27 @@ class TargetAck:
     decay_microseconds: int = 0
 
 
+@dataclass(frozen=True)
+class DoubleAck:
+    status: int
+    applied_sample_counter: int
+    old_phase_step: int
+    new_phase_step: int
+    commit_phase: int
+
+
 def decode_target_ack(payload: bytes) -> TargetAck:
     if len(payload) == 8:
         return TargetAck(*struct.unpack("<IHBB", payload))
     if len(payload) == 10:
         return TargetAck(*struct.unpack("<IHBBH", payload))
     raise ValueError("TARGET_ACK payload must be 8 or 10 bytes")
+
+
+def decode_double_ack(payload: bytes) -> DoubleAck:
+    if len(payload) != 17:
+        raise ValueError("DOUBLE_ACK payload must be 17 bytes")
+    return DoubleAck(*struct.unpack("<BIIII", payload))
 
 
 def decode_result(payload: bytes) -> CaptureResult:

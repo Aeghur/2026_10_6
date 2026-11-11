@@ -10,12 +10,16 @@ import serial
 
 from protocol import (
     FrameDecoder,
+    DoubleAck,
     TYPE_ERROR,
+    TYPE_PC_ARM_DOUBLE,
+    TYPE_PC_DOUBLE_ACK,
     TYPE_PC_SET_TARGET,
     TYPE_PC_SET_WAVEFORM,
     TYPE_PC_TARGET_ACK,
     TargetAck,
     decode_error,
+    decode_double_ack,
     decode_target_ack,
     encode_frame,
 )
@@ -28,6 +32,9 @@ ERROR_TEXT = {
     2: "FPGA确认帧格式或序号错误",
     3: "FPGA确认帧CRC错误",
     4: "目标频率超出250～210000 Hz范围",
+    5: "倍频事务忙",
+    6: "当前输出状态不允许确定相位倍频",
+    7: "等待下降过零或DAC生效超时",
 }
 
 
@@ -251,6 +258,46 @@ class MSPM0WaveLink:
                 TYPE_PC_SET_WAVEFORM, self._sequence, payload
             ))
             self._serial.flush()
+
+    def arm_double_at_falling_zero(self) -> DoubleAck:
+        """Atomically change a free-running sine from 1x to 2x.
+
+        The FPGA ACK is delayed until the first tagged 2x sample has reached
+        the DAC interface.  Unlike ordinary waveform writes, this operation
+        is never fire-and-forget.
+        """
+        with self._lock:
+            if self._serial is None:
+                self.open()
+            self._sequence = (self._sequence % 255) + 1
+            sequence = self._sequence
+            decoder = FrameDecoder(max_payload=64)
+            self._serial.reset_input_buffer()
+            self._serial.write(encode_frame(
+                TYPE_PC_ARM_DOUBLE, sequence
+            ))
+            self._serial.flush()
+            deadline = time.monotonic() + max(self.timeout, 2.0)
+            while time.monotonic() < deadline:
+                block = self._serial.read(self._serial.in_waiting or 1)
+                for frame in decoder.feed(block):
+                    if frame.sequence != sequence:
+                        continue
+                    if frame.frame_type == TYPE_ERROR:
+                        raise MSPM0CommandError(decode_error(frame.payload))
+                    if frame.frame_type == TYPE_PC_DOUBLE_ACK:
+                        ack = decode_double_ack(frame.payload)
+                        if ack.status != 0:
+                            raise MSPM0LinkError(
+                                f"FPGA倍频ACK状态异常：{ack.status}"
+                            )
+                        if ack.new_phase_step != ((
+                                ack.old_phase_step << 1) & 0xFFFFFFFF):
+                            raise MSPM0LinkError("FPGA倍频ACK的FTW不是精确2倍")
+                        return ack
+            raise MSPM0TimeoutError(
+                f"等待下降过零倍频及DAC生效确认超时（{self.port}）"
+            )
 
     def set_sawtooth(
         self, frequency_hz: float, phase_degrees: float = 0.0,

@@ -13,6 +13,8 @@ from protocol import (
     TYPE_ERROR,
     TYPE_PC_SET_TARGET,
     TYPE_PC_SET_WAVEFORM,
+    TYPE_PC_ARM_DOUBLE,
+    TYPE_PC_DOUBLE_ACK,
     TYPE_PC_TARGET_ACK,
     encode_frame,
 )
@@ -35,6 +37,13 @@ class FakeSerial:
     def write(self, data):
         self.written = data
         request = FrameDecoder().feed(data)[0]
+        if request.frame_type == TYPE_PC_ARM_DOUBLE:
+            payload = struct.pack(
+                "<BIIII", 0, 1234, 0x40000000, 0x80000000, 0x7f000000)
+            self.rx.extend(encode_frame(
+                TYPE_PC_DOUBLE_ACK, request.sequence, payload
+            ))
+            return len(data)
         if self.response_type == TYPE_PC_TARGET_ACK:
             if request.frame_type == TYPE_PC_SET_WAVEFORM:
                 waveform, frequency, phase, amplitude = struct.unpack_from(
@@ -103,6 +112,15 @@ class WaveLinkTests(unittest.TestCase):
         self.assertEqual(request.frame_type, TYPE_PC_SET_WAVEFORM)
         self.assertEqual(struct.unpack("<BIHB", request.payload),
                          (0, 10_000_001, 0, 0))
+
+    def test_atomic_double_round_trip(self):
+        serial_port = FakeSerial()
+        ack = MSPM0WaveLink(serial_port=serial_port).arm_double_at_falling_zero()
+        request = FrameDecoder().feed(serial_port.written)[0]
+        self.assertEqual(request.frame_type, TYPE_PC_ARM_DOUBLE)
+        self.assertEqual(request.payload, b"")
+        self.assertEqual(ack.old_phase_step, 0x40000000)
+        self.assertEqual(ack.new_phase_step, 0x80000000)
 
     def test_falling_sawtooth_round_trip(self):
         serial_port = FakeSerial()

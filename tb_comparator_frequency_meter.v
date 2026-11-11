@@ -6,6 +6,7 @@ module tb_comparator_frequency_meter;
     reg rst = 1'b1;
     reg comparator_in = 1'b0;
     reg tone_enable = 1'b1;
+    integer tone_half_period_ns = 100000;
     wire rising_edge;
     wire frequency_valid;
     wire [16:0] frequency_hz;
@@ -15,11 +16,14 @@ module tb_comparator_frequency_meter;
     reg [63:0] expected_step;
 
     always #500 clk = ~clk;
-    always #100000 comparator_in = tone_enable && !comparator_in;
+    always begin
+        #(tone_half_period_ns);
+        comparator_in = tone_enable && !comparator_in;
+    end
 
     comparator_frequency_meter #(
         .CLK_HZ(CLK_HZ), .SAMPLE_HZ(SAMPLE_HZ),
-        .MIN_HZ(1_000), .MAX_HZ(10_000)
+        .MIN_HZ(1_000), .MAX_HZ(11_000)
     ) meter (
         .clk(clk), .rst(rst), .comparator_in(comparator_in),
         .rising_edge(rising_edge), .frequency_valid(frequency_valid),
@@ -53,6 +57,19 @@ module tb_comparator_frequency_meter;
         if (frequency_hz !== 17'd0 || phase_step !== 32'd0 ||
             display.bcd_display !== 24'h000000) begin
             $display("FAIL: missing comparator signal was not cleared");
+            $finish;
+        end
+
+        // The upper endpoint must remain valid; this models the production
+        // change from 100 kHz to 110 kHz with a 10x scaled test clock.
+        tone_half_period_ns = 45455;
+        tone_enable = 1'b1;
+        repeat (3) @(posedge frequency_valid);
+        #20000;
+        if (frequency_hz < 17'd10990 || frequency_hz > 17'd11000 ||
+            phase_step == 32'd0) begin
+            $display("FAIL: upper-end frequency was rejected: hz=%0d step=%0d",
+                     frequency_hz, phase_step);
             $finish;
         end
         $display("PASS: T14 frequency, DDS phase step, six digits, signal loss");

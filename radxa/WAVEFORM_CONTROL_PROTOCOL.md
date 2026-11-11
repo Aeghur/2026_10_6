@@ -173,6 +173,46 @@ A5 5A 93 01 08 00 80 96 98 00 00 00 00 31 27 AB
 注意：该确认不是MSPM0“已收到串口数据”的简单回显。MSPM0会先向FPGA发送
 `SET_OUTPUT`，等待FPGA返回有效ACK，然后才向Radxa发送`0x93`。
 
+## 相位确定的1倍频到2倍频：`0x15 ARM_DOUBLE`
+
+圆阶段已经确认自由运行正弦相对输入约超前90°后，不要再用普通`SET_WAVEFORM`
+命令计算一个独立的2倍频FTW。发送空载荷命令`0x15`，FPGA会等待当前有效查表相位
+`carrier_phase-applied_phase_lag`跨越下降过零边界，再把当前Q38 FTW原子左移一位。
+相位累加器、相移和幅度均不重置。
+
+Python接口：
+
+```python
+ack = waveform.arm_double_at_falling_zero()
+print(ack.applied_sample_counter)
+print(hex(ack.old_phase_step), hex(ack.new_phase_step))
+```
+
+也可在Radxa本机执行：
+
+```bash
+python wave_control.py --port /dev/ttyS4 --arm-double
+```
+
+该操作只接受当前状态为自由运行、1倍频、正弦、已锁定、相位命令已完成平滑，且
+FTW左移后不超过210 kHz的情况。锯齿、快降脉冲、实时跟随模式、重复倍频及越界请求
+会被拒绝。专用操作等待真实提交，不能使用fire-and-forget模式。
+
+成功响应为`0x94 DOUBLE_ACK`，17字节小端载荷：
+
+```text
+status:u8 + applied_sample_counter:u32 + old_ftw:u32 +
+new_ftw:u32 + commit_phase:u32
+```
+
+成功时`status=0`且`new_ftw=2*old_ftw`。`commit_phase`是提交前的旧频率有效查表
+相位，应位于下降过零跨越之前；样本计数属于FPGA采样时钟域，不是Radxa时间戳。
+ACK仅在首个带新频率标签的样本穿过DDS、幅度映射并更新DAC数字接口后返回。
+
+错误帧仍为`0xE0`：错误码5表示事务忙，6表示当前输出状态不允许该操作，7表示等待
+相位稳定、下降过零或DAC生效超时。普通`0x14 SET_WAVEFORM`行为保持不变，仍用于
+后续绝对频率和相位微调。
+
 ## 错误响应：`0xE0 ERROR`
 
 错误payload固定2字节，为`error_code:u16LE`：
@@ -183,6 +223,9 @@ A5 5A 93 01 08 00 80 96 98 00 00 00 00 31 27 AB
 | 2 | FPGA确认帧格式或序号错误 |
 | 3 | FPGA确认帧CRC错误 |
 | 4 | 目标频率超出250～210000 Hz范围 |
+| 5 | 下降过零倍频事务忙 |
+| 6 | 当前输出状态不允许确定相位倍频 |
+| 7 | 等待下降过零或DAC生效超时 |
 
 收到错误帧后不要把命令记为已执行。可记录错误并进行有限次数重试；如果连续出现
 错误1～3，应报告硬件链路故障，不要无限快速重发。建议单次端到端等待时间为1秒。

@@ -33,6 +33,16 @@ class NetworkLinkTests(unittest.TestCase):
         self.assertFalse(request['wait_for_confirmation'])
         self.assertEqual(ack.frequency_millihz, 10_000_001)
 
+    def test_atomic_double_request(self):
+        link = self.make_link({'double_ack': dict(
+            status=0, applied_sample_counter=1234,
+            old_phase_step=0x40000000, new_phase_step=0x80000000,
+            commit_phase=0x7f000000)})
+        ack = link.arm_double_at_falling_zero()
+        self.assertEqual(json.loads(link.process.stdin.getvalue()),
+                         {'operation': 'arm_double'})
+        self.assertEqual(ack.new_phase_step, ack.old_phase_step << 1)
+
     def test_invalid_target_not_sent(self):
         link = self.make_link({})
         with self.assertRaises(ValueError):
