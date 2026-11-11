@@ -1,0 +1,145 @@
+{
+  "source_run": "optical_lock_v2_1793450472673982773",
+  "frames": [
+    {
+      "image": "frame_0001_384.png",
+      "time_s": 0.0,
+      "signal": {
+        "frequency_hz": 70000.516,
+        "vpp": 4.0,
+        "phase_deg": 45.0
+      },
+      "original_status": "set_signal"
+    },
+    {
+      "image": "frame_0002_384.png",
+      "time_s": 0.3020518860002994,
+      "signal": {
+        "frequency_hz": 70000.516,
+        "vpp": 4.0,
+        "phase_deg": 135.0
+      },
+      "original_status": "set_signal"
+    },
+    {
+      "image": "frame_0003_384.png",
+      "time_s": 0.572055323999848,
+      "signal": {
+        "frequency_hz": 70000.516,
+        "vpp": 4.0,
+        "phase_deg": 45.0
+      },
+      "original_status": "set_signal"
+    },
+    {
+      "image": "frame_0004_384.png",
+      "time_s": 0.838025701999868,
+      "signal": {
+        "frequency_hz": 70000.516,
+        "vpp": 4.0,
+        "phase_deg": 135.0
+      },
+      "original_status": "set_signal"
+    },
+    {
+      "image": "frame_0005_384.png",
+      "time_s": 1.1079981840002802,
+      "signal": {
+        "frequency_hz": 70000.516,
+        "vpp": 4.0,
+        "phase_deg": 45.0
+      },
+      "original_status": "set_signal"
+    },
+    {
+      "image": "frame_0006_384.png",
+      "time_s": 1.3762679080000453,
+      "signal": {
+        "frequency_hz": 70000.516,
+        "vpp": 4.0,
+        "phase_deg": 135.0
+      },
+      "original_status": "recapture"
+    },
+    {
+      "image": "frame_0007_384.png",
+      "time_s": 1.6039643980002438,
+      "signal": {
+        "frequency_hz": 70000.516,
+        "vpp": 4.0,
+        "phase_deg": 135.0
+      },
+      "original_status": "set_signal"
+    },
+    {
+      "image": "frame_0008_384.png",
+      "time_s": 1.8719871109997257,
+      "signal": {
+        "frequency_hz": 70000.516,
+        "vpp": 4.0,
+        "phase_deg": 180.0
+      },
+      "original_status": "set_signal"
+    },
+    {
+      "image": "frame_0009_384.png",
+      "time_s": 2.1400719009998284,
+      "signal": {
+        "frequency_hz": 70000.516,
+        "vpp": 4.0,
+        "phase_deg": 225.0
+      },
+      "original_status": "set_signal"
+    },
+    {
+      "image": "frame_0010_384.png",
+      "time_s": 2.4061327780000283,
+      "signal": {
+        "frequency_hz": 70000.516,
+        "vpp": 4.0,
+        "phase_deg": 270.0
+      },
+      "original_status": "set_signal"
+    },
+    {
+      "image": "frame_0011_384.png",
+      "time_s": 2.676236594000329,
+      "signal": {
+        "frequency_hz": 70000.516,
+        "vpp": 4.0,
+        "phase_deg": 315.0
+      },
+      "original_status": "set_signal"
+    },
+    {
+      "image": "frame_0012_384.png",
+      "time_s": 2.944034848999763,
+      "signal": {
+        "frequency_hz": 70000.516,
+        "vpp": 4.0,
+        "phase_deg": 0.0
+      },
+      "original_status": "set_signal"
+    },
+    {
+      "image": "frame_0013_384.png",
+      "time_s": 3.2082584930003577,
+      "signal": {
+        "frequency_hz": 70000.516,
+        "vpp": 4.0,
+        "phase_deg": 45.0
+      },
+      "original_status": "set_signal"
+    },
+    {
+      "image": "frame_0014_384.png",
+      "time_s": 3.4761476270005005,
+      "signal": {
+        "frequency_hz": 70000.516,
+        "vpp": 4.0,
+        "phase_deg": 90.0
+      },
+      "original_status": "needs_frequency_check"
+    }
+  ]
+}

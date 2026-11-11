@@ -1,196 +1,60 @@
 {
-  "scope": "standalone runtime export; no training or hardware execution",
-  "standalone_unit_tests": {
-    "passed": 3,
-    "closed_loop_cases": 5,
-    "targets": [
+  "version": "2.1.0",
+  "date_client": "2026-11-07",
+  "unit_tests": {
+    "count": 9,
+    "passed": true
+  },
+  "closed_loop_simulation": {
+    "original_regression_cases": 5,
+    "slow_capture_cases": 12,
+    "modes": [
       "circle",
       "diagonal",
       "infinity"
     ],
-    "hardware_error_cases_hz": [
-      2,
-      -2,
-      0.433,
-      -0.433,
-      2
-    ]
+    "slow_probe_interval_s": 0.268,
+    "slow_hold_interval_s": 0.19,
+    "slow_exposure_ms": 8,
+    "slow_line_width_px": 2,
+    "slow_frequency_step_hz": 0.001,
+    "slow_initial_residual_hz": [
+      -0.012,
+      0.0,
+      0.004,
+      0.012
+    ],
+    "unknown_initial_phase_coverage": "Fixed virtual plant initial carrier, source phase and offset; not a full phase sweep.",
+    "clock": "Virtual capture and ACK times with simulated processing delay; excludes wall-clock inference benchmarking."
   },
-  "torch_free_import": true,
-  "json_ipc_start": true,
-  "policy_conversion": {
-    "frequency": {
-      "contexts": 240,
-      "max_logit_difference": 4.76837158203125e-07,
-      "all_decisions_equal": true
-    },
-    "phase": {
-      "contexts": 240,
-      "max_logit_difference": 7.152557373046875e-07,
-      "all_decisions_equal": true
-    }
+  "real_image_component_replay": {
+    "original_images": 20,
+    "continued_probe_combined_valid_views": 11,
+    "combined_fit_accepted": true,
+    "combined_residual_hz": 0.0033,
+    "hold_sequence_proposes_local_correction": true,
+    "scope": "Recorded original actions only. No claim of counterfactual closed-loop hardware success."
   },
-  "upstream_simulation": {
-    "best_round": 40,
-    "config": {
-      "seed": 20261107,
-      "rounds": 10000,
-      "scenes_per_round": 6,
-      "updates_per_round": 20,
-      "batch_size": 32,
-      "learning_rate": 0.001,
-      "max_minutes": 15,
-      "validation_cases": 36,
-      "test_cases": 108,
-      "validation_every": 5,
-      "clock_offset_hz": 0,
-      "noise_max": 5,
-      "line_width_max": 2,
-      "phase_tolerance_deg": 5,
-      "end_tolerance_deg": 10,
-      "frequency_tolerance_hz": 0.02,
-      "hardware_error_hz": 2,
-      "trim_limit_hz": 2.25,
-      "exposure_ms": 2,
-      "timestamp_jitter_ms": 1,
-      "tuning_step_hz": 0.0001,
-      "max_iterations": 5,
-      "control_limit_s": 10,
-      "lock_residual_hz": 0.004
-    },
-    "test": {
-      "learned": {
-        "count": 108,
-        "success_count": 108,
-        "success_rate": 1.0,
-        "accepted_wrong": 0,
-        "mean_images_all": 64.83333333333333,
-        "mean_protocol_seconds_all": 6.640370370370371,
-        "max_protocol_seconds_success": 8.77,
-        "mean_residual_hz_success": 0.0004319415042775492,
-        "max_residual_hz_success": 0.001951031299540773,
-        "max_phase_error_deg_success": 0.4262991398572922,
-        "max_5s_excursion_deg_success": 3.9381554790306836,
-        "by_mode": {
-          "circle": {
-            "success": 36,
-            "count": 36
-          },
-          "diagonal": {
-            "success": 36,
-            "count": 36
-          },
-          "infinity": {
-            "success": 36,
-            "count": 36
-          }
-        },
-        "failure_reasons": {}
-      },
-      "fixed": {
-        "count": 108,
-        "success_count": 108,
-        "success_rate": 1.0,
-        "accepted_wrong": 0,
-        "mean_images_all": 64.53703703703704,
-        "mean_protocol_seconds_all": 6.98425925925926,
-        "max_protocol_seconds_success": 9.77,
-        "mean_residual_hz_success": 0.0006288504665605986,
-        "max_residual_hz_success": 0.001951031299540773,
-        "max_phase_error_deg_success": 0.4262991398572922,
-        "max_5s_excursion_deg_success": 3.9381554790306836,
-        "by_mode": {
-          "circle": {
-            "success": 36,
-            "count": 36
-          },
-          "diagonal": {
-            "success": 36,
-            "count": 36
-          },
-          "infinity": {
-            "success": 36,
-            "count": 36
-          }
-        },
-        "failure_reasons": {}
-      }
-    },
-    "endpoint_stress": {
-      "learned": {
-        "count": 12,
-        "success_count": 12,
-        "success_rate": 1.0,
-        "accepted_wrong": 0,
-        "mean_images_all": 70.33333333333333,
-        "mean_protocol_seconds_all": 7.296666666666667,
-        "max_protocol_seconds_success": 8.17,
-        "mean_residual_hz_success": 0.0005141666285150374,
-        "max_residual_hz_success": 0.0017775873566279188,
-        "max_phase_error_deg_success": 0.3628511428833008,
-        "max_5s_excursion_deg_success": 3.5625083848135546,
-        "by_mode": {
-          "circle": {
-            "success": 4,
-            "count": 4
-          },
-          "diagonal": {
-            "success": 4,
-            "count": 4
-          },
-          "infinity": {
-            "success": 4,
-            "count": 4
-          }
-        },
-        "failure_reasons": {}
-      },
-      "fixed": {
-        "count": 12,
-        "success_count": 12,
-        "success_rate": 1.0,
-        "accepted_wrong": 0,
-        "mean_images_all": 69.83333333333333,
-        "mean_protocol_seconds_all": 7.795000000000001,
-        "max_protocol_seconds_success": 8.67,
-        "mean_residual_hz_success": 0.0007531623244479609,
-        "max_residual_hz_success": 0.0017775873566279188,
-        "max_phase_error_deg_success": 0.3628511428833008,
-        "max_5s_excursion_deg_success": 3.5625083848135546,
-        "by_mode": {
-          "circle": {
-            "success": 4,
-            "count": 4
-          },
-          "diagonal": {
-            "success": 4,
-            "count": 4
-          },
-          "infinity": {
-            "success": 4,
-            "count": 4
-          }
-        },
-        "failure_reasons": {}
-      }
-    },
-    "actions": {
-      "(1.0, 0)": 153,
-      "(1.0, 1)": 59,
-      "(1.0, 2)": 21
-    },
-    "safeguard_overrides": 0,
-    "run_files_unchanged": true,
-    "sha256": {
-      "best.pt": "4cd1d20eecbfb8b87db40233a3eed44b3a344e7858820a804f0655ce7891f251",
-      "latest.pt": "8c0935eaa97a5ab4f3ea8fb095f8f3354fd942149498a9b3989043dcb44794b0",
-      "metrics.jsonl": "98f7fc43149331873f9f99744ba9897c84ed750c95a3a2cd30dd661a8b1c1e4c",
-      "status.json": "1a5930262b5516a53f809532d55761b815b8b3e73362f78ae446e84da11889c6"
-    },
-    "elapsed_seconds": 125.90599999999995
+  "reliability_regressions": [
+    "ACK and image identity",
+    "stale and duplicate frames",
+    "hold gap resets",
+    "history phase rebasing",
+    "discard history after frequency change",
+    "age-bounded history",
+    "ambiguous fit supplements instead of false lock",
+    "signed multi-frame local drift",
+    "explicit insufficient time",
+    "no local inverse without an acquired phase anchor"
+  ],
+  "formal_defaults": {
+    "shape_tolerance_div": 0.2,
+    "hold_seconds": 5,
+    "max_hold_gap_s": 0.25,
+    "timeout_s": 10
   },
-  "limitations": [
-    "No physical camera, DDS, board, or oscilloscope validation performed.",
-    "Upstream simulation results are distinct from standalone adapter tests."
-  ]
+  "policy_weights_sha256": "fd7f8b2c0edc37a7aecd4817d2a97617cfa200c4bc2f489fc71abe00f592ae9a",
+  "policy_retrained": false,
+  "old_release_preserved": true,
+  "physical_hardware_validation": false
 }

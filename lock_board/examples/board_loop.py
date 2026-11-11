@@ -19,7 +19,7 @@ def run(camera,dac,known_nominal_source_hz,mode='circle'):
             current,cid=ack.signal,ack.command_id
             decision=ctrl.applied(cid,current,ack.applied_at_s)
         if decision.success:return decision
-        if decision.status in {'timeout','not_converged','trim_limit','needs_frequency_check','needs_calibration','restart_required','needs_amplitude_adjustment'}:return decision
+        if decision.status in {'insufficient_time','timeout','not_converged','trim_limit','needs_frequency_check','needs_calibration','restart_required','needs_amplitude_adjustment'}:return decision
         if decision.capture_after_s:
             wait=decision.capture_after_s-time.monotonic()
             if wait>0:time.sleep(wait)

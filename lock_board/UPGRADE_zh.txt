@@ -1,0 +1,57 @@
+给合作者的最小升级步骤（v2.1.0）
+
+一、改哪些
+压缩包中 lock_board/ 整体替换原项目同名子目录。
+不替换你现有的摄像头、图像转换、频率标定、UART、FPGA或配置文件。
+原 lock_hardware_test.py 可以继续使用；接口的 start/step/retime_pending/applied 不变。
+新增终止状态 insufficient_time 是失败。原入口已按继续状态白名单处理，可正常退出。
+如果你另写过状态机，只有 complete 且 success=true 才算成功。
+
+二、电脑CMD上传压缩包（按你当前可用的SSH地址替换）
+scp "C:\Users\someo\Desktop\comptetion\FGPA_project\2026_10_6\deliverables\lissajous_lock_board_v2_1.zip" radxa@192.168.137.2:/home/radxa/
+
+三、开发板终端升级
+先停止原来的测试进程，再逐行执行：
+
+cd /home/radxa/vision_sorter
+cp -a lock_board "lock_board_backup_$(date +%Y%m%d_%H%M%S)"
+unzip -o /home/radxa/lissajous_lock_board_v2_1.zip -d .
+python -c "from lock_board.lock_control import __version__; print(__version__)"
+PYTHONPATH=lock_board python -m unittest discover -s lock_board/tests -v
+python lock_board/verify_manifest.py
+
+版本应为2.1.0，全部测试和文件校验应通过。
+用原项目原来的Python/虚拟环境；如果原来是.venv/bin/python，上述python也改成那个路径。
+本机测试不会打开摄像头或串口。
+
+四、重新做一轮实测
+确认信号源当前确实为70000Hz、两路幅度已经设置好、相机和网格标定没动，
+再手动执行下面这条会实际改变DAC输出的命令：
+
+python -u lock_hardware_test.py --source-hz 70000 --initial-lead 45
+
+这条从名义70000Hz重新按你们的标定初始化一次。
+本版所有后续返回的频率已经是最终绝对命令，继续保持不重复套标定。
+首次先观察circle。之后可分别用 --mode diagonal、--mode infinity 验证另外两种目标。
+infinity由控制器按名义输入二倍频输出，初始标定仍由原入口完成一次。
+
+五、看什么结果
+1. decisions应出现Collect nonlinear probe；不是旧的线性45°递增顺序。
+2. 跨批时telemetry.carried_frames可大于0，原有效图片不会无条件清空。
+3. Local multi-frame...表示保持期间的小频差/相位调整，每次调整后重新计5秒。
+4. diagonal先出现quadrature refinement相关采集，再切0°开始正式保持。
+5. insufficient_time明确表示当前实际速度下剩余时间不够，不代表名义测频错误。
+6. 保存完整result.json以及raw/warped/384图片。旧图不能检验新命令后的结果。
+
+六、保持的条件没有放宽
+正式保持仍为误差<=0.2div、连续合格采样>=5秒、采样间隔<=0.25秒，总窗口默认10秒。
+若诊断使用 --timeout 20，必须单独标记为放宽时间的诊断结果，不能计为10秒内成功。
+本版不调整幅度或每帧重标定。实际图像若有固定偏心、尺寸差或裁切，仍需在原采集/标定层解决。
+ACK仍只是寄存器反馈，不是频率计真值；实际FPGA相位连续性和图像有效时间戳仍需硬件核实。
+
+七、回退
+停止新版测试，保留新版目录后，把第三步备份中的lock_board目录恢复到原位置。
+不要直接从另一个工程复制相机/串口配置覆盖当前项目。
+
+本版模型权重与v2相同，修改的是控制和观测利用逻辑，没有启动新训练。
+VALIDATION.json区分真实旧图片的局部重放和虚拟闭环；目前没有新版实机锁定验收结果。

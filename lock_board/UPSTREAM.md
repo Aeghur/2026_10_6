@@ -1,8 +1,9 @@
-Imported from https://github.com/Aeghur/2026_10_6
+Imported release: lissajous_lock_board_v2_1.zip
 
-Branch: feat/optical-lock-v2
-Commit: 446bbbd
-Path: lock_board/
+Version: 2.1.0
+Archive SHA256: 756c77f2b678b723b328a2c50e57856e72feb96ceb13b6ff387f220139d23c02
+Previous workspace snapshot: 35ed73c
 
-Exported files are unchanged. This provenance file is a local addition.
-The real-board adapter is ../lock_hardware_test.py.
+Source was the user-provided attachment, not a verified new Git commit.
+Release files are unchanged. UPSTREAM.md is local provenance metadata.
+The actual adapter remains ../lock_hardware_test.py.

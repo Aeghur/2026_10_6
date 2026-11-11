@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import asdict
 import json
 from pathlib import Path
 from frequency_calibration import set_calibrated_waveform, waveform_frequency
@@ -21,7 +22,9 @@ def main() -> int:
         "--port", required=True,
         help="MSPM0串口，例如Windows的COM18或Radxa的/dev/ttyS4"
     )
-    parser.add_argument("--frequency", type=float, required=True,
+    operation = parser.add_mutually_exclusive_group(required=True)
+    operation.add_argument("--arm-double", action="store_true", help="在下降过零精确倍频；需配套新版FPGA/MSPM0固件")
+    operation.add_argument("--frequency", type=float,
                         help="目标输出频率；快降脉冲固定100 Hz，其他波形250～210000 Hz")
     parser.add_argument("--phase", type=float, default=0.0,
                         help="目标滞后相位，单位度，范围0～359.99")
@@ -37,6 +40,18 @@ def main() -> int:
                         default="rising", help="锯齿方向：缓升快降或缓降快升")
     parser.add_argument("--no-frequency-calibration", action="store_true")
     args = parser.parse_args()
+    if args.arm_double:
+        try:
+            with MSPM0WaveLink(args.port) as link:
+                ack = link.arm_double_at_falling_zero()
+        except (MSPM0LinkError, OSError) as error:
+            print(f"倍频未确认：{error}；请先核对实际输出状态，程序未自动重试")
+            return 1
+        print("DOUBLE_ACK", json.dumps(dict(**asdict(ack),
+            old_frequency_hz=ack.old_frequency_millihz / 1000,
+            new_frequency_hz=ack.new_frequency_millihz / 1000,
+            sample_counter_clock_domain="fpga"), ensure_ascii=False))
+        return 0
     cfg = json.loads(Path(__file__).with_name("config.json").read_text())
     calibrated = cfg.get("enable_frequency_calibration", True) and not args.no_frequency_calibration
     try:

@@ -8,7 +8,8 @@ import time
 import cv2
 
 from frequency_calibration import set_calibrated_waveform, quantized_frequency
-from lock_board.lock_control import LockController, Signal, Frame, Options
+from circle_double_control import CircleThenDoubleController
+from lock_board.lock_control import LockController, Signal, Frame, Options, __version__ as LOCK_VERSION
 from msp_wave_link import MSPM0WaveLink, MSPM0LinkError
 from phase_hardware_test import TestCamera
 from strategy_control import StrategyImageAdapter
@@ -35,6 +36,17 @@ def apply_lock_signal(link, requested):
         command_frequency_hz=float(frequency), actual_signal=asdict(actual))
 
 
+def arm_hardware_double(link):
+    """Single transaction, no retry; sample counter stays in FPGA time domain."""
+    sent = time.monotonic()
+    ack = link.arm_double_at_falling_zero()
+    received = time.monotonic()
+    return ack, received, dict(ack_type=0x94, ack=asdict(ack),
+        operation='arm_double_at_falling_zero', send_s=sent, ack_received_s=received,
+        host_application_time_basis='ack_received_upper_bound_not_actual_event_time',
+        sample_counter_clock_domain='fpga', command_frequency_hz=ack.new_frequency_millihz/1000)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source-hz', type=float, required=True)
@@ -55,15 +67,21 @@ def main():
     cfg['white_value_min'] = profile['hsv_value_min']
     options = Options(frequency_step_hz=.001, exposure_ms=cfg['manual_exposure'] * .1,
                       settle_s=.08, command_latency_s=.011, timeout_s=args.timeout)
-    controller = LockController(args.source_hz, args.mode, options=options,
-                                continuous_phase=True, use_policy=not args.no_policy)
-    output_nominal = args.source_hz * (2 if args.mode == 'infinity' else 1)
+    controller_options = dict(options=options, continuous_phase=True, use_policy=not args.no_policy)
+    controller = (CircleThenDoubleController(args.source_hz, **controller_options)
+        if args.mode == 'infinity' else LockController(args.source_hz, args.mode, **controller_options))
+    # Every mode starts at the source frequency; infinity first acquires a
+    # quadrature refinement, then doubles frequency and uses original v2.1
+    # control to acquire the 2:1 generalized phase and verify the final hold.
+    output_nominal = args.source_hz
     if args.initial_command_hz is not None:
         controller._signal_ok(Signal(args.initial_command_hz, args.vpp, args.initial_lead))
     out = ROOT / 'artifacts/diagnostics' / f'optical_lock_v2_{time.time_ns()}'
     out.mkdir(parents=True)
-    report = dict(upstream_commit='446bbbd', source_frequency_hz=args.source_hz,
+    report = dict(algorithm_version=LOCK_VERSION, release_source='lissajous_lock_board_v2_1.zip',
+        source_frequency_hz=args.source_hz,
         mode=args.mode, options=asdict(options), use_policy=not args.no_policy,
+        frequency_route='quadrature_refine_then_hardware_double_then_hold' if args.mode == 'infinity' else 'v2_1_target',
         success=False, hardware_validated=False, commands=[], frames=[], decisions=[],
         limitations=[
             'Accumulator continuity inferred from repository RTL, flashed build not identified.',
@@ -74,6 +92,7 @@ def main():
     print('ARTIFACTS', out, flush=True)
     pending_images = []
     camera = None
+    double_state_unverified = False
 
     def save():
         (out / 'result.json').write_text(json.dumps(report, ensure_ascii=False, indent=2))
@@ -81,8 +100,8 @@ def main():
     def record_command(cid, requested, actual, timing, reason):
         report['commands'].append(dict(command_id=cid, reason=reason,
             requested=asdict(requested), nominal_source_hz=args.source_hz,
-            output_nominal_hz=output_nominal,
-            frequency_trim_hz=actual.frequency_hz-output_nominal, **timing))
+            output_nominal_hz=controller.output_nominal,
+            frequency_trim_hz=actual.frequency_hz-controller.output_nominal, **timing))
         save()
 
     try:
@@ -112,6 +131,9 @@ def main():
                 report['decisions'].append(decision.to_dict())
                 telemetry = decision.telemetry or {}
                 print(json.dumps(dict(status=decision.status, reason=decision.reason,
+                    requested_mode=args.mode, output_stage=(
+                        ('double_' if controller.double_acknowledged else 'circle_') + controller.stage
+                    ) if args.mode == 'infinity' else controller.stage,
                     residual_hz=telemetry.get('residual_output_frequency_hz'),
                     shape_error_div=telemetry.get('shape_error_div'),
                     verified_hold_s=telemetry.get('verified_hold_s')), ensure_ascii=False), flush=True)
@@ -125,6 +147,16 @@ def main():
                     last = report['commands'][-1]
                     planned = time.monotonic() + (last['ack_received_s']-last['send_s']) / 2
                     cmd = controller.retime_pending(planned)
+                    if args.mode == 'infinity' and controller.stage == 'await_double':
+                        # This branch MUST NOT send SET_WAVEFORM or add a phase.
+                        double_state_unverified = True
+                        ack, acknowledged_at, timing = arm_hardware_double(link)
+                        decision = controller.applied_double(cmd.command_id, ack, acknowledged_at)
+                        actual = controller.signal
+                        timing['actual_signal'] = asdict(actual)
+                        record_command(cmd.command_id, cmd.signal, actual, timing, cmd.reason)
+                        double_state_unverified = False
+                        continue
                     actual, applied, timing = apply_lock_signal(link, cmd.signal)
                     record_command(cmd.command_id, cmd.signal, actual, timing, cmd.reason)
                     decision = controller.applied(cmd.command_id, actual, applied)
@@ -147,8 +179,17 @@ def main():
             # Leave the latest acknowledged state; report it explicitly even if
             # failure occurred while probing, rather than claiming a lock.
             report['final_output'] = asdict(actual)
+            if args.mode == 'infinity':
+                report['target_switch_completed'] = controller.double_acknowledged
+                report['final_output_stage'] = ('double_' if controller.double_acknowledged else 'circle_') + controller.stage
     except Exception as error:
         report['error'] = f'{type(error).__name__}: {error}'
+        if double_state_unverified:
+            report['output_state'] = 'unknown_after_arm_double_failure'
+            report['output_state_verification_required'] = True
+            report['automatic_retry_performed'] = False
+            report['final_output'] = None
+            report['last_acknowledged_output_before_double'] = asdict(actual)
         raise
     finally:
         if camera is not None:
@@ -165,6 +206,8 @@ def main():
                 for d in report['decisions']), default=0))
         save()
     print('RESULT', report.get('final_status'), 'success=', report['success'], flush=True)
+    if args.mode == 'infinity' and not report.get('target_switch_completed'):
+        print('TARGET_NOT_APPLIED: circle acquisition failed or time ran out; output is still at source frequency.', flush=True)
 
 
 if __name__ == '__main__':

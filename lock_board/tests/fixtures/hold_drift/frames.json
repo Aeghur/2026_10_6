@@ -1,0 +1,65 @@
+{
+  "source_run": "optical_lock_v2_1793450444010639401",
+  "frames": [
+    {
+      "image": "frame_0021_384.png",
+      "time_s": 0.0,
+      "signal": {
+        "frequency_hz": 70000.516,
+        "vpp": 4.0,
+        "phase_deg": 313.46
+      },
+      "original_status": "hold"
+    },
+    {
+      "image": "frame_0022_384.png",
+      "time_s": 0.3801198060000388,
+      "signal": {
+        "frequency_hz": 70000.516,
+        "vpp": 4.0,
+        "phase_deg": 313.46
+      },
+      "original_status": "hold"
+    },
+    {
+      "image": "frame_0023_384.png",
+      "time_s": 0.5710198040005707,
+      "signal": {
+        "frequency_hz": 70000.516,
+        "vpp": 4.0,
+        "phase_deg": 313.46
+      },
+      "original_status": "hold"
+    },
+    {
+      "image": "frame_0024_384.png",
+      "time_s": 0.7629536270005701,
+      "signal": {
+        "frequency_hz": 70000.516,
+        "vpp": 4.0,
+        "phase_deg": 313.46
+      },
+      "original_status": "hold"
+    },
+    {
+      "image": "frame_0025_384.png",
+      "time_s": 0.9537582210004985,
+      "signal": {
+        "frequency_hz": 70000.516,
+        "vpp": 4.0,
+        "phase_deg": 313.46
+      },
+      "original_status": "hold"
+    },
+    {
+      "image": "frame_0026_384.png",
+      "time_s": 1.1418776840000646,
+      "signal": {
+        "frequency_hz": 70000.516,
+        "vpp": 4.0,
+        "phase_deg": 313.46
+      },
+      "original_status": "recapture"
+    }
+  ]
+}

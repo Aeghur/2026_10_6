@@ -14,6 +14,10 @@ from protocol import (
     TYPE_PC_SET_TARGET,
     TYPE_PC_SET_WAVEFORM,
     TYPE_PC_TARGET_ACK,
+    TYPE_PC_ARM_DOUBLE,
+    TYPE_PC_DOUBLE_ACK,
+    DoubleAck,
+    decode_double_ack,
     TargetAck,
     decode_error,
     decode_target_ack,
@@ -28,6 +32,9 @@ ERROR_TEXT = {
     2: "FPGA确认帧格式或序号错误",
     3: "FPGA确认帧CRC错误",
     4: "目标频率超出250～210000 Hz范围",
+    5: "下降过零倍频事务忙",
+    6: "当前输出状态不允许确定相位倍频",
+    7: "等待下降过零或DAC生效超时",
 }
 
 
@@ -115,6 +122,7 @@ class MSPM0WaveLink:
         self._owns_serial = serial_port is None
         self._sequence = 0
         self._lock = threading.Lock()
+        self.double_state_verification_required = False
 
     def open(self) -> "MSPM0WaveLink":
         if self._serial is None:
@@ -169,6 +177,7 @@ class MSPM0WaveLink:
                             raise MSPM0LinkError(
                                 "MSPM0确认帧未标记为自由运行模式"
                             )
+                        self.double_state_verification_required = False
                         return ack
             raise MSPM0TimeoutError(
                 f"等待MSPM0/FPGA端到端确认超时（{self.port}）"
@@ -222,9 +231,55 @@ class MSPM0WaveLink:
                             raise MSPM0LinkError(
                                 "MSPM0确认的下降时间与请求不一致"
                             )
+                        self.double_state_verification_required = False
                         return ack
             raise MSPM0TimeoutError(
                 f"等待MSPM0/FPGA端到端确认超时（{self.port}）"
+            )
+
+    def arm_double_at_falling_zero(self) -> DoubleAck:
+        """Arm one hardware-timed double; return only a matching 0x94 ACK.
+
+        No automatic retry: after timeout the output may already be doubled.
+        Firmware must implement 0x15/Q38 and ACK after the DAC digital update.
+        The returned sample counter belongs to the FPGA clock domain.
+        """
+        with self._lock:
+            if self.double_state_verification_required:
+                raise MSPM0LinkError("上次ARM_DOUBLE状态未核对，禁止重发；需人工核对或显式重新初始化输出")
+            if self._serial is None:
+                self.open()
+            self._sequence = (self._sequence % 255) + 1
+            sequence = self._sequence
+            decoder = FrameDecoder()
+            # A partial write or lost ACK can still leave the FPGA doubled.
+            self.double_state_verification_required = True
+            self._serial.write(encode_frame(TYPE_PC_ARM_DOUBLE, sequence))
+            self._serial.flush()
+            deadline = time.monotonic() + self.timeout
+            while time.monotonic() < deadline:
+                block = self._serial.read(self._serial.in_waiting or 1)
+                for frame in decoder.feed(block):
+                    if frame.sequence != sequence:
+                        continue
+                    if frame.frame_type == TYPE_ERROR:
+                        raise MSPM0CommandError(decode_error(frame.payload))
+                    if frame.frame_type != TYPE_PC_DOUBLE_ACK:
+                        continue
+                    try:
+                        ack = decode_double_ack(frame.payload)
+                    except ValueError as error:
+                        raise MSPM0LinkError(str(error)) from error
+                    if ack.status != 0:
+                        raise MSPM0LinkError(f"DOUBLE_ACK失败状态: {ack.status}")
+                    if ack.old_phase_step <= 0 or ack.new_phase_step != 2 * ack.old_phase_step:
+                        raise MSPM0LinkError("DOUBLE_ACK频率字不是精确两倍")
+                    if not 250_000 <= ack.new_frequency_millihz <= 210_000_000:
+                        raise MSPM0LinkError("DOUBLE_ACK频率超出250～210000 Hz")
+                    self.double_state_verification_required = False
+                    return ack
+            raise MSPM0TimeoutError(
+                f"等待0x94 DOUBLE_ACK超时（{self.port}）；输出状态待核对，禁止自动重试"
             )
 
     def set_sawtooth(

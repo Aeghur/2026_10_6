@@ -10,8 +10,10 @@ TYPE_PC_SET_PHASE = 0x11
 TYPE_PC_SET_MODE = 0x12
 TYPE_PC_SET_TARGET = 0x13
 TYPE_PC_SET_WAVEFORM = 0x14
+TYPE_PC_ARM_DOUBLE = 0x15
 TYPE_PC_RESULT = 0x90
 TYPE_PC_TARGET_ACK = 0x93
+TYPE_PC_DOUBLE_ACK = 0x94
 TYPE_ERROR = 0xE0
 MAX_PAYLOAD = 20_000
 
@@ -109,6 +111,34 @@ class TargetAck:
     amplitude_code: int
     mode: int
     decay_microseconds: int = 0
+
+
+@dataclass(frozen=True)
+class DoubleAck:
+    status: int
+    applied_sample_counter: int  # FPGA sample domain, NOT host monotonic time.
+    old_phase_step: int         # Free-running Q38 frequency tuning word.
+    new_phase_step: int
+    commit_phase: int           # Q32 effective phase before crossing.
+
+    @staticmethod
+    def frequency_millihz(phase_step: int) -> int:
+        # Exact integer ROUND_HALF_UP conversion from Q38 at 25 MHz.
+        return (phase_step * 25_000_000_000 + (1 << 37)) // (1 << 38)
+
+    @property
+    def old_frequency_millihz(self) -> int:
+        return self.frequency_millihz(self.old_phase_step)
+
+    @property
+    def new_frequency_millihz(self) -> int:
+        return self.frequency_millihz(self.new_phase_step)
+
+
+def decode_double_ack(payload: bytes) -> DoubleAck:
+    if len(payload) != 17:
+        raise ValueError('DOUBLE_ACK payload must be 17 bytes')
+    return DoubleAck(*struct.unpack('<BIIII', payload))
 
 
 def decode_target_ack(payload: bytes) -> TargetAck:

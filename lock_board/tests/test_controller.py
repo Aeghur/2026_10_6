@@ -13,11 +13,11 @@ class Plant:
         self.carrier=(self.carrier+2*np.pi*actual*(t-self.time))%(2*np.pi);self.time=t;return actual
     def apply(self,command):
         self.advance(command.apply_at_s);self.signal=command.signal
-    def image(self,t):
-        actual=self.advance(t);tau=np.linspace(-.001,.001,6000)
+    def image(self,t,exposure_ms=2,width=1):
+        actual=self.advance(t);tau=np.linspace(-exposure_ms*.0005,exposure_ms*.0005,12000)
         x=4*np.sin(2*np.pi*self.source*(t+tau)+self.alpha)
         y=4*np.sin(self.carrier+2*np.pi*actual*tau+math.radians(self.signal.phase_deg))
-        im=Image.new('L',(384,384));ImageDraw.Draw(im).line(np.column_stack(((x+5)*38.3,(5-y)*38.3)).ravel().tolist(),fill=235,width=1)
+        im=Image.new('L',(384,384));ImageDraw.Draw(im).line(np.column_stack(((x+5)*38.3,(5-y)*38.3)).ravel().tolist(),fill=235,width=width)
         return im
 
 class Tests(unittest.TestCase):
